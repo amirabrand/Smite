@@ -29,18 +29,43 @@ else:
 
 def get_compose_file():
     """Get docker-compose file path"""
-    project_root = Path(__file__).parent.parent
-    # Try root docker-compose.yml first, then docker/docker-compose.panel.yml
-    root_compose = project_root / "docker-compose.yml"
-    if root_compose.exists():
-        return root_compose
-    return project_root / "docker" / "docker-compose.panel.yml"
+    # Try common installation paths first
+    possible_roots = [
+        Path("/opt/smite"),  # Standard install location
+        Path.cwd(),  # Current directory
+        Path(__file__).parent.parent,  # Relative to CLI location
+    ]
+    
+    for project_root in possible_roots:
+        # Try root docker-compose.yml first
+        root_compose = project_root / "docker-compose.yml"
+        if root_compose.exists():
+            return root_compose
+        # Try docker/docker-compose.panel.yml
+        docker_compose = project_root / "docker" / "docker-compose.panel.yml"
+        if docker_compose.exists():
+            return docker_compose
+    
+    # If nothing found, return the most likely path
+    return Path("/opt/smite") / "docker-compose.yml"
 
 
 def get_env_file():
     """Get .env file path"""
-    project_root = Path(__file__).parent.parent
-    return project_root / ".env"
+    # Try common installation paths
+    possible_roots = [
+        Path("/opt/smite"),  # Standard install location
+        Path.cwd(),  # Current directory
+        Path(__file__).parent.parent,  # Relative to CLI location
+    ]
+    
+    for project_root in possible_roots:
+        env_file = project_root / ".env"
+        if env_file.exists():
+            return env_file
+    
+    # If nothing found, return the most likely path
+    return Path("/opt/smite") / ".env"
 
 
 def get_panel_port():
