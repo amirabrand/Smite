@@ -142,8 +142,8 @@ async def apply_tunnel(tunnel_id: str, db: AsyncSession = Depends(get_db)):
     client = Hysteria2Client()
     try:
         # Update node metadata with API address if not set
-        if not node.metadata.get("api_address"):
-            node.metadata["api_address"] = f"http://{node.fingerprint}:8888"  # Fallback
+        if not node.node_metadata.get("api_address"):
+            node.node_metadata["api_address"] = f"http://{node.fingerprint}:8888"  # Fallback
             await db.commit()
         
         response = await client.send_to_node(

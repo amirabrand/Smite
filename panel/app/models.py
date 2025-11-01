@@ -19,7 +19,7 @@ class Node(Base):
     status = Column(String, default="pending")  # pending, active, offline
     registered_at = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, default=datetime.utcnow)
-    metadata = Column(JSON, default=dict)
+    node_metadata = Column("metadata", JSON, default=dict)  # Use "metadata" as column name in DB, but node_metadata as attribute
     
 
 class Tunnel(Base):

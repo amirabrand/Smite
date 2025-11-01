@@ -28,7 +28,7 @@ class Hysteria2Client:
                 return {"status": "error", "message": f"Node {node_id} not found"}
             
             # Extract node address from metadata or use default
-            node_address = node.metadata.get("api_address", f"http://localhost:8888")
+            node_address = node.node_metadata.get("api_address", f"http://localhost:8888") if node.node_metadata else f"http://localhost:8888"
             
             # Construct full URL
             if not node_address.startswith("http"):

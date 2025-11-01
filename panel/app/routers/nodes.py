@@ -16,7 +16,7 @@ router = APIRouter()
 class NodeCreate(BaseModel):
     name: str
     fingerprint: str
-    metadata: dict = {}
+    metadata: dict = {}  # Keep as metadata in API, maps to node_metadata in model
 
 
 class NodeResponse(BaseModel):
@@ -26,10 +26,11 @@ class NodeResponse(BaseModel):
     status: str
     registered_at: datetime
     last_seen: datetime
-    metadata: dict
+    metadata: dict  # Maps to node_metadata in model
     
     class Config:
         from_attributes = True
+    
 
 
 @router.post("", response_model=NodeResponse)
@@ -44,7 +45,7 @@ async def create_node(node: NodeCreate, db: AsyncSession = Depends(get_db)):
         existing.last_seen = datetime.utcnow()
         existing.status = "active"
         if node.metadata:
-            existing.metadata.update(node.metadata)
+            existing.node_metadata.update(node.metadata)
         await db.commit()
         await db.refresh(existing)
         return existing
@@ -54,7 +55,7 @@ async def create_node(node: NodeCreate, db: AsyncSession = Depends(get_db)):
         name=node.name,
         fingerprint=node.fingerprint,
         status="active",
-        metadata=node.metadata or {}
+        node_metadata=node.metadata or {}
     )
     db.add(db_node)
     await db.commit()
@@ -67,7 +68,18 @@ async def list_nodes(db: AsyncSession = Depends(get_db)):
     """List all nodes"""
     result = await db.execute(select(Node))
     nodes = result.scalars().all()
-    return nodes
+    return [
+        NodeResponse(
+            id=n.id,
+            name=n.name,
+            fingerprint=n.fingerprint,
+            status=n.status,
+            registered_at=n.registered_at,
+            last_seen=n.last_seen,
+            metadata=n.node_metadata or {}
+        )
+        for n in nodes
+    ]
 
 
 @router.get("/{node_id}", response_model=NodeResponse)
@@ -77,7 +89,15 @@ async def get_node(node_id: str, db: AsyncSession = Depends(get_db)):
     node = result.scalar_one_or_none()
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
-    return node
+    return NodeResponse(
+        id=node.id,
+        name=node.name,
+        fingerprint=node.fingerprint,
+        status=node.status,
+        registered_at=node.registered_at,
+        last_seen=node.last_seen,
+        metadata=node.node_metadata or {}
+    )
 
 
 @router.delete("/{node_id}")
