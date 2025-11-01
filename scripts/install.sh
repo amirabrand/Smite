@@ -22,6 +22,13 @@ if ! command -v git &> /dev/null; then
     apt-get update && apt-get install -y git
 fi
 
+# Install Node.js and npm if not present
+if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+    echo "Node.js/npm not found. Installing Node.js..."
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+    apt-get install -y nodejs
+fi
+
 # Install Docker if not present
 if ! command -v docker &> /dev/null; then
     echo "Docker not found. Installing Docker..."
@@ -134,17 +141,34 @@ if ! python3 -c "import requests" 2>/dev/null; then
 fi
 
 # Build frontend if needed
-if [ -d "frontend" ] && [ ! -d "frontend/dist" ]; then
-    echo ""
-    echo "Building frontend..."
-    cd frontend
-    if command -v npm &> /dev/null; then
-        npm install && npm run build
+if [ -d "frontend" ]; then
+    if [ ! -d "frontend/dist" ] || [ -z "$(ls -A frontend/dist 2>/dev/null)" ]; then
+        echo ""
+        echo "Building frontend..."
+        cd frontend
+        
+        # Check npm again (might have been installed above)
+        if ! command -v npm &> /dev/null; then
+            echo "Installing Node.js..."
+            curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+            apt-get install -y nodejs
+        fi
+        
+        echo "Installing frontend dependencies..."
+        npm install --silent
+        
+        echo "Building frontend..."
+        npm run build
+        
+        if [ ! -d "dist" ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then
+            echo "Warning: Frontend build failed. API will still be available at /api and /docs"
+        else
+            echo "Frontend built successfully"
+        fi
+        cd ..
     else
-        echo "Warning: npm not found. Frontend will not be available."
-        echo "Install Node.js and npm, then run: cd frontend && npm install && npm run build"
+        echo "Frontend already built"
     fi
-    cd ..
 fi
 
 # Start services
