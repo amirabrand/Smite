@@ -187,66 +187,26 @@ class WSAdapter(TCPAdapter):
         # Use remote_port for the listening port, or listen_port as fallback
         listen_port = spec.get("remote_port") or spec.get("listen_port", 10000)
         
-        # Check if we should forward to a local service (like TCP does) or use as VMESS tunnel
-        forward_to = spec.get("forward_to")
-        
-        if forward_to:
-            # Forward mode: Use dokodemo-door with WS transport to forward to local service
-            if ":" in str(forward_to):
-                forward_host, forward_port = str(forward_to).rsplit(":", 1)
-            else:
-                forward_host = "127.0.0.1"
-                forward_port = str(forward_to)
-            
-            try:
-                forward_port_int = int(forward_port)
-            except (ValueError, TypeError):
-                forward_port_int = 2053
-            
-            config = {
-                "log": {"loglevel": "warning"},
-                "inbounds": [{
-                    "port": int(listen_port),
-                    "protocol": "dokodemo-door",
-                    "settings": {
-                        "address": forward_host,
-                        "port": forward_port_int,
-                        "network": "tcp"
-                    },
-                    "streamSettings": {
-                        "network": "ws",
-                        "wsSettings": {
-                            "path": spec.get("path", "/")
-                        }
+        config = {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{
+                "port": int(listen_port),
+                "protocol": "vmess",
+                "settings": {
+                    "clients": [{"id": spec.get("uuid", "")}]
+                },
+                "streamSettings": {
+                    "network": "ws",
+                    "wsSettings": {
+                        "path": spec.get("path", "/")
                     }
-                }],
-                "outbounds": [{
-                    "protocol": "freedom",
-                    "settings": {}
-                }]
-            }
-        else:
-            # VMESS mode: Create a VMESS WebSocket server
-            config = {
-                "log": {"loglevel": "warning"},
-                "inbounds": [{
-                    "port": int(listen_port),
-                    "protocol": "vmess",
-                    "settings": {
-                        "clients": [{"id": spec.get("uuid", "")}]
-                    },
-                    "streamSettings": {
-                        "network": "ws",
-                        "wsSettings": {
-                            "path": spec.get("path", "/")
-                        }
-                    }
-                }],
-                "outbounds": [{
-                    "protocol": "freedom",
-                    "settings": {}
-                }]
-            }
+                }
+            }],
+            "outbounds": [{
+                "protocol": "freedom",
+                "settings": {}
+            }]
+        }
         
         config_path = self.config_dir / f"{tunnel_id}.json"
         
@@ -291,66 +251,26 @@ class GRPCAdapter(TCPAdapter):
         # Use remote_port for the listening port, or listen_port as fallback
         listen_port = spec.get("remote_port") or spec.get("listen_port", 10000)
         
-        # Check if we should forward to a local service (like TCP does) or use as VMESS tunnel
-        forward_to = spec.get("forward_to")
-        
-        if forward_to:
-            # Forward mode: Use dokodemo-door with gRPC transport to forward to local service
-            if ":" in str(forward_to):
-                forward_host, forward_port = str(forward_to).rsplit(":", 1)
-            else:
-                forward_host = "127.0.0.1"
-                forward_port = str(forward_to)
-            
-            try:
-                forward_port_int = int(forward_port)
-            except (ValueError, TypeError):
-                forward_port_int = 2053
-            
-            config = {
-                "log": {"loglevel": "warning"},
-                "inbounds": [{
-                    "port": int(listen_port),
-                    "protocol": "dokodemo-door",
-                    "settings": {
-                        "address": forward_host,
-                        "port": forward_port_int,
-                        "network": "tcp"
-                    },
-                    "streamSettings": {
-                        "network": "grpc",
-                        "grpcSettings": {
-                            "serviceName": spec.get("service_name", "GrpcService")
-                        }
+        config = {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{
+                "port": int(listen_port),
+                "protocol": "vmess",
+                "settings": {
+                    "clients": [{"id": spec.get("uuid", "")}]
+                },
+                "streamSettings": {
+                    "network": "grpc",
+                    "grpcSettings": {
+                        "serviceName": spec.get("service_name", "GrpcService")
                     }
-                }],
-                "outbounds": [{
-                    "protocol": "freedom",
-                    "settings": {}
-                }]
-            }
-        else:
-            # VMESS mode: Create a VMESS gRPC server
-            config = {
-                "log": {"loglevel": "warning"},
-                "inbounds": [{
-                    "port": int(listen_port),
-                    "protocol": "vmess",
-                    "settings": {
-                        "clients": [{"id": spec.get("uuid", "")}]
-                    },
-                    "streamSettings": {
-                        "network": "grpc",
-                        "grpcSettings": {
-                            "serviceName": spec.get("service_name", "GrpcService")
-                        }
-                    }
-                }],
-                "outbounds": [{
-                    "protocol": "freedom",
-                    "settings": {}
-                }]
-            }
+                }
+            }],
+            "outbounds": [{
+                "protocol": "freedom",
+                "settings": {}
+            }]
+        }
         
         config_path = self.config_dir / f"{tunnel_id}.json"
         
