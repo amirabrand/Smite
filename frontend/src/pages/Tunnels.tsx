@@ -261,6 +261,8 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
         return { ...baseSpec, path: '/', uuid: generateUUID() }
       case 'grpc':
         return { ...baseSpec, service_name: 'GrpcService', uuid: generateUUID() }
+      case 'udp':
+        return { ...baseSpec, uuid: generateUUID(), header_type: 'none' }
       default:
         return baseSpec
     }
