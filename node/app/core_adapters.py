@@ -169,13 +169,119 @@ class TCPAdapter:
 
 
 class UDPAdapter(TCPAdapter):
-    """UDP tunnel via xray-core"""
+    """UDP tunnel via xray-core with VLESS mKCP"""
     name = "udp"
     
     def apply(self, tunnel_id: str, spec: Dict[str, Any]):
-        """Apply UDP tunnel"""
-        # Similar to TCP but with UDP-specific config
-        super().apply(tunnel_id, spec)
+        """Apply UDP tunnel - VLESS with mKCP transport"""
+        # Use remote_port for the listening port, or listen_port as fallback
+        listen_port = spec.get("remote_port") or spec.get("listen_port", 10000)
+        
+        # For UDP, we can either forward to a local service or create a VLESS server
+        forward_to = spec.get("forward_to")
+        
+        if forward_to:
+            # Forward mode: Use dokodemo-door with UDP to forward to local service
+            if ":" in str(forward_to):
+                forward_host, forward_port = str(forward_to).rsplit(":", 1)
+            else:
+                forward_host = "127.0.0.1"
+                forward_port = str(forward_to)
+            
+            try:
+                forward_port_int = int(forward_port)
+            except (ValueError, TypeError):
+                forward_port_int = 2053
+            
+            config = {
+                "log": {"loglevel": "warning"},
+                "inbounds": [{
+                    "port": int(listen_port),
+                    "protocol": "dokodemo-door",
+                    "settings": {
+                        "address": forward_host,
+                        "port": forward_port_int,
+                        "network": "udp"
+                    }
+                }],
+                "outbounds": [{
+                    "protocol": "freedom",
+                    "settings": {}
+                }]
+            }
+        else:
+            # VLESS mKCP mode: Create a VLESS server with mKCP transport
+            mtu = spec.get("mtu", 1350)
+            tti = spec.get("tti", 50)
+            uplink_capacity = spec.get("uplink_capacity", 5)
+            downlink_capacity = spec.get("downlink_capacity", 20)
+            congestion = spec.get("congestion", False)
+            read_buffer_size = spec.get("read_buffer_size", 2)
+            write_buffer_size = spec.get("write_buffer_size", 2)
+            
+            config = {
+                "log": {"loglevel": "warning"},
+                "inbounds": [{
+                    "port": int(listen_port),
+                    "protocol": "vless",
+                    "settings": {
+                        "clients": [{"id": spec.get("uuid", "")}],
+                        "decryption": "none"
+                    },
+                    "streamSettings": {
+                        "network": "kcp",
+                        "kcpSettings": {
+                            "mtu": mtu,
+                            "tti": tti,
+                            "uplinkCapacity": uplink_capacity,
+                            "downlinkCapacity": downlink_capacity,
+                            "congestion": congestion,
+                            "readBufferSize": read_buffer_size,
+                            "writeBufferSize": write_buffer_size,
+                            "header": {
+                                "type": spec.get("header_type", "none")
+                            }
+                        }
+                    }
+                }],
+                "outbounds": [{
+                    "protocol": "freedom",
+                    "settings": {}
+                }]
+            }
+        
+        config_path = self.config_dir / f"{tunnel_id}.json"
+        
+        # Remove old process if exists
+        if tunnel_id in self.processes:
+            self.remove(tunnel_id)
+        
+        with open(config_path, "w") as f:
+            json.dump(config, f)
+        
+        # Start xray-core
+        try:
+            proc = subprocess.Popen(
+                ["/usr/local/bin/xray", "-config", str(config_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            self.processes[tunnel_id] = proc
+            time.sleep(0.5)
+            if proc.poll() is not None:
+                stderr = proc.stderr.read().decode() if proc.stderr else "Unknown error"
+                raise RuntimeError(f"xray failed to start: {stderr}")
+        except FileNotFoundError:
+            proc = subprocess.Popen(
+                ["xray", "-config", str(config_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            self.processes[tunnel_id] = proc
+            time.sleep(0.5)
+            if proc.poll() is not None:
+                stderr = proc.stderr.read().decode() if proc.stderr else "Unknown error"
+                raise RuntimeError(f"xray failed to start: {stderr}")
 
 
 class WSAdapter(TCPAdapter):
