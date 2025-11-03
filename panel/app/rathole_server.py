@@ -46,7 +46,7 @@ class RatholeServerManager:
             # Create TOML configuration
             config = f"""[server]
 bind_addr = "{bind_addr}"
-token = "{token}"
+default_token = "{token}"
 
 [server.services.{tunnel_id}]
 bind_addr = "0.0.0.0:{proxy_port}"
