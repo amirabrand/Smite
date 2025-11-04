@@ -98,6 +98,10 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             }
         )
         
+        # Debug: Print response
+        print(f"DEBUG: Node response for tunnel {db_tunnel.id}: {response}")
+        logger.info(f"Node response for tunnel {db_tunnel.id}: {response}")
+        
         # Check if node returned an error
         if response.get("status") == "error":
             db_tunnel.status = "error"
@@ -108,6 +112,8 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             return db_tunnel
         
         if response.get("status") == "success":
+            print(f"DEBUG: Tunnel {db_tunnel.id} applied successfully, status={response.get('status')}")
+            logger.info(f"Tunnel {db_tunnel.id} applied successfully")
             db_tunnel.status = "active"
             
             # Start forwarding on panel using gost (for TCP/UDP/WS/gRPC tunnels)
