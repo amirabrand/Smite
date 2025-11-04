@@ -107,6 +107,30 @@ echo "Configuration:"
 read -p "Panel port (default: 8000): " PANEL_PORT
 PANEL_PORT=${PANEL_PORT:-8000}
 
+# Ask about domain and HTTPS
+echo ""
+read -p "Do you want to use a domain with HTTPS? [y/N]: " USE_DOMAIN
+USE_DOMAIN=${USE_DOMAIN:-n}
+
+DOMAIN=""
+DOMAIN_EMAIL=""
+NGINX_ENABLED="false"
+
+if [ "$USE_DOMAIN" = "y" ] || [ "$USE_DOMAIN" = "Y" ]; then
+    read -p "Enter your domain name (e.g., panel.example.com): " DOMAIN
+    if [ -n "$DOMAIN" ]; then
+        read -p "Enter your email for Let's Encrypt notifications: " DOMAIN_EMAIL
+        if [ -n "$DOMAIN_EMAIL" ]; then
+            NGINX_ENABLED="true"
+            echo "HTTPS will be automatically configured with Let's Encrypt"
+        else
+            echo -e "${YELLOW}Warning: Email is required for Let's Encrypt. HTTPS setup skipped.${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Warning: No domain provided. HTTPS setup skipped.${NC}"
+    fi
+fi
+
 read -p "Database type [sqlite/mysql] (default: sqlite): " DB_TYPE
 DB_TYPE=${DB_TYPE:-sqlite}
 
@@ -114,7 +138,8 @@ DB_TYPE=${DB_TYPE:-sqlite}
 cat > .env << EOF
 PANEL_PORT=$PANEL_PORT
 PANEL_HOST=0.0.0.0
-HTTPS_ENABLED=false
+HTTPS_ENABLED=${NGINX_ENABLED}
+PANEL_DOMAIN=${DOMAIN}
 DOCS_ENABLED=true
 
 DB_TYPE=$DB_TYPE
@@ -222,7 +247,34 @@ fi
 # Start services
 echo ""
 echo "Starting Smite Panel..."
-docker compose up -d
+if [ "$NGINX_ENABLED" = "true" ]; then
+    # Start with nginx profile
+    export NGINX_ENABLED=true
+    docker compose --profile https up -d
+    
+    # Wait a bit for services to start
+    echo "Waiting for services to start..."
+    sleep 5
+    
+    # Set up SSL certificates
+    if [ -n "$DOMAIN" ] && [ -n "$DOMAIN_EMAIL" ]; then
+        echo ""
+        echo "Setting up SSL certificates..."
+        chmod +x scripts/setup-ssl.sh
+        bash scripts/setup-ssl.sh "$DOMAIN" "$DOMAIN_EMAIL" || {
+            echo -e "${YELLOW}Warning: SSL setup had issues. You can configure it manually later.${NC}"
+        }
+        
+        # Update nginx config with domain and restart
+        if [ -f "nginx/nginx.conf" ]; then
+            sed -i "s/REPLACE_DOMAIN/$DOMAIN/g" nginx/nginx.conf 2>/dev/null || true
+            docker restart smite-nginx > /dev/null 2>&1 || true
+        fi
+    fi
+else
+    # Start without nginx (direct access)
+    docker compose up -d
+fi
 
 # Wait for services
 echo "Waiting for services to start..."
@@ -233,12 +285,23 @@ if docker ps | grep -q smite-panel; then
     echo ""
     echo -e "${GREEN}✅ Smite Panel installed successfully!${NC}"
     echo ""
-    echo "Panel URL: http://localhost:$PANEL_PORT"
-    echo "API Docs: http://localhost:$PANEL_PORT/docs"
+    if [ "$NGINX_ENABLED" = "true" ] && [ -n "$DOMAIN" ]; then
+        echo "Panel URL: https://$DOMAIN"
+        echo "API Docs: https://$DOMAIN/docs"
+        echo ""
+        echo "Note: Make sure your domain DNS points to this server's IP address"
+    else
+        echo "Panel URL: http://localhost:$PANEL_PORT"
+        echo "API Docs: http://localhost:$PANEL_PORT/docs"
+    fi
     echo ""
     echo "Next steps:"
     echo "  1. Create admin user: smite admin create"
-    echo "  2. Access the web interface at http://localhost:$PANEL_PORT"
+    if [ "$NGINX_ENABLED" = "true" ] && [ -n "$DOMAIN" ]; then
+        echo "  2. Access the web interface at https://$DOMAIN"
+    else
+        echo "  2. Access the web interface at http://localhost:$PANEL_PORT"
+    fi
     echo ""
 else
     echo -e "${RED}❌ Installation completed but panel is not running${NC}"

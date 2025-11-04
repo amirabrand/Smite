@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     # Panel
     panel_port: int = 8000
     panel_host: str = "0.0.0.0"
+    panel_domain: str = ""  # Domain name for HTTPS (e.g., panel.example.com)
     https_enabled: bool = False
     https_cert_path: str = "./certs/server.crt"
     https_key_path: str = "./certs/server.key"

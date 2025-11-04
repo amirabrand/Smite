@@ -10,7 +10,11 @@ services:
       context: ./panel
       dockerfile: Dockerfile
     container_name: smite-panel
-    network_mode: host
+    # Use bridge network to work with nginx, but expose ports if nginx is not used
+    networks:
+      - smite-network
+    ports:
+      - "${PANEL_PORT:-8000}:8000"
     volumes:
       - ./panel/data:/app/data
       - ./panel/certs:/app/certs
@@ -29,6 +33,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # Nginx reverse proxy with SSL (only when domain is configured)
+  nginx:
+    image: nginx:alpine
+    container_name: smite-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      - smite-panel
+    networks:
+      - smite-network
+    restart: unless-stopped
+    profiles:
+      - https
 
   # Optional: Separate frontend service (if not served by panel)
   frontend:
@@ -49,6 +72,7 @@ services:
 networks:
   smite-network:
     driver: bridge
+    name: smite-network
 
 volumes:
   panel-data:
