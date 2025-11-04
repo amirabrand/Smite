@@ -83,6 +83,8 @@ class Hysteria2Client:
         
         registration_data = {
             "name": settings.node_name,
+            "ip_address": node_ip,
+            "api_port": settings.node_api_port,
             "fingerprint": self.fingerprint,
             "metadata": {
                 "api_address": f"http://{node_ip}:{settings.node_api_port}",
