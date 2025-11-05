@@ -41,44 +41,64 @@ class GostForwarder:
             # Build gost command based on tunnel type
             # Forward directly to target (forward_to format: "host:port")
             if tunnel_type == "tcp":
-                # TCP forwarding: gost -L=tcp://0.0.0.0:local_port -F=tcp://forward_to
-                # Use 0.0.0.0 to bind to all interfaces (required for host networking)
-                # For VLESS/TCP, we need transparent forwarding without any buffering or protocol inspection
-                # Remove keepalive from listen side, only on forward side to maintain connection to target
+                # TCP forwarding using gost chain syntax (like Shifter): -L=tcp://:port/host:port
+                # This syntax is more reliable for transparent TCP forwarding (e.g., VLESS)
+                # Parse forward_to to get host and port
+                if ":" in forward_to:
+                    forward_host, forward_port = forward_to.rsplit(":", 1)
+                else:
+                    forward_host = forward_to
+                    forward_port = "8080"
+                # Use chain syntax: listen on local_port, forward to forward_host:forward_port
                 cmd = [
                     "/usr/local/bin/gost",
                     "-log=stdout",
-                    f"-L=tcp://0.0.0.0:{local_port}",
-                    f"-F=tcp://{forward_to}?keepalive=true&so_keepalive=true"
+                    f"-L=tcp://0.0.0.0:{local_port}/{forward_host}:{forward_port}"
                 ]
             elif tunnel_type == "udp":
-                # UDP forwarding: gost -L=udp://0.0.0.0:local_port -F=udp://forward_to
+                # UDP forwarding using gost chain syntax: -L=udp://:port/host:port
+                if ":" in forward_to:
+                    forward_host, forward_port = forward_to.rsplit(":", 1)
+                else:
+                    forward_host = forward_to
+                    forward_port = "8080"
                 cmd = [
                     "/usr/local/bin/gost",
-                    f"-L=udp://0.0.0.0:{local_port}",
-                    f"-F=udp://{forward_to}"
+                    f"-L=udp://0.0.0.0:{local_port}/{forward_host}:{forward_port}"
                 ]
             elif tunnel_type == "ws":
-                # WebSocket forwarding (no TLS): gost -L=ws://0.0.0.0:local_port -F=tcp://forward_to
+                # WebSocket forwarding using chain syntax: -L=ws://:port/host:port
+                if ":" in forward_to:
+                    forward_host, forward_port = forward_to.rsplit(":", 1)
+                else:
+                    forward_host = forward_to
+                    forward_port = "8080"
                 cmd = [
                     "/usr/local/bin/gost",
-                    f"-L=ws://0.0.0.0:{local_port}",
-                    f"-F=tcp://{forward_to}"
+                    f"-L=ws://0.0.0.0:{local_port}/{forward_host}:{forward_port}"
                 ]
             elif tunnel_type == "grpc":
-                # gRPC forwarding (no TLS): gost -L=grpc://0.0.0.0:local_port -F=tcp://forward_to
+                # gRPC forwarding using chain syntax: -L=grpc://:port/host:port
+                if ":" in forward_to:
+                    forward_host, forward_port = forward_to.rsplit(":", 1)
+                else:
+                    forward_host = forward_to
+                    forward_port = "8080"
                 cmd = [
                     "/usr/local/bin/gost",
-                    f"-L=grpc://0.0.0.0:{local_port}",
-                    f"-F=tcp://{forward_to}"
+                    f"-L=grpc://0.0.0.0:{local_port}/{forward_host}:{forward_port}"
                 ]
             elif tunnel_type == "tcpmux":
-                # TCPMux forwarding (no TLS): gost -L=tcpmux://0.0.0.0:local_port -F=tcp://forward_to
+                # TCPMux forwarding using chain syntax: -L=tcpmux://:port/host:port
                 # Note: tcpmux:// is plain TCP, no TLS. Use tcpmux+tls:// for TLS.
+                if ":" in forward_to:
+                    forward_host, forward_port = forward_to.rsplit(":", 1)
+                else:
+                    forward_host = forward_to
+                    forward_port = "8080"
                 cmd = [
                     "/usr/local/bin/gost",
-                    f"-L=tcpmux://0.0.0.0:{local_port}",
-                    f"-F=tcp://{forward_to}"
+                    f"-L=tcpmux://0.0.0.0:{local_port}/{forward_host}:{forward_port}"
                 ]
             else:
                 raise ValueError(f"Unsupported tunnel type: {tunnel_type}")
