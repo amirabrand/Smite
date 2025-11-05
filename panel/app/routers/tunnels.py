@@ -121,14 +121,18 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 await db.refresh(db_tunnel)
                 return db_tunnel
         
-        # Mark as active (for both gost and rathole)
+        # Determine what needs to be started
+        needs_gost_forwarding = db_tunnel.type in ["tcp", "udp", "ws", "grpc", "tcpmux"] and db_tunnel.core == "xray"
+        needs_rathole_server = db_tunnel.core == "rathole"
+        
+        logger.info(f"Tunnel {db_tunnel.id}: needs_gost_forwarding={needs_gost_forwarding}, needs_rathole_server={needs_rathole_server}")
+        
+        # Mark as active (for both gost and rathole) - will be set to error if startup fails
         db_tunnel.status = "active"
         
         try:
             # Start forwarding on panel using gost (for TCP/UDP/WS/gRPC/tcpmux tunnels)
             # Rathole: reverse tunnel, needs Rathole server on panel
-            needs_gost_forwarding = db_tunnel.type in ["tcp", "udp", "ws", "grpc", "tcpmux"] and db_tunnel.core == "xray"
-            needs_rathole_server = db_tunnel.core == "rathole"
             
             if needs_gost_forwarding:
                 # listen_port: panel port where clients connect
