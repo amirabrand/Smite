@@ -63,16 +63,26 @@ const Tunnels = () => {
   }
 
   if (loading) {
-    return <div className="text-center py-12">Loading...</div>
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400 mb-4"></div>
+          <p className="text-gray-500 dark:text-gray-400">Loading tunnels...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div>
+    <div className="w-full max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Tunnels</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Tunnels</h1>
+          <p className="text-gray-500 dark:text-gray-400">Manage your tunnel connections</p>
+        </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 font-medium shadow-sm hover:shadow-md flex items-center gap-2"
         >
           <Plus size={20} />
           Create Tunnel

@@ -47,21 +47,48 @@ const Logs = () => {
   }
 
   if (loading && logs.length === 0) {
-    return <div className="text-center py-12">Loading logs...</div>
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400 mb-4"></div>
+          <p className="text-gray-500 dark:text-gray-400">Loading logs...</p>
+        </div>
+      </div>
+    )
+  }
+
+  const getLevelColorDark = (level: string) => {
+    switch (level.toLowerCase()) {
+      case 'error':
+        return 'text-red-400'
+      case 'warning':
+        return 'text-yellow-400'
+      case 'info':
+        return 'text-blue-400'
+      default:
+        return 'text-gray-300'
+    }
   }
 
   return (
-    <div>
-      <h1 className="text-3xl font-bold text-gray-900 mb-8">Logs</h1>
+    <div className="w-full max-w-7xl mx-auto">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Logs</h1>
+        <p className="text-gray-500 dark:text-gray-400">View system and application logs</p>
+      </div>
 
-      <div className="bg-gray-900 rounded-lg border border-gray-200 p-4 font-mono text-sm overflow-auto" style={{ maxHeight: '600px' }}>
-        {logs.map((log, index) => (
-          <div key={index} className="mb-1">
-            <span className="text-gray-500">[{log.timestamp}]</span>{' '}
-            <span className={getLevelColor(log.level)}>[{log.level}]</span>{' '}
-            <span className="text-gray-300">{log.message}</span>
-          </div>
-        ))}
+      <div className="bg-gray-900 dark:bg-black rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 font-mono text-sm overflow-auto" style={{ maxHeight: '70vh' }}>
+        {logs.length === 0 ? (
+          <div className="text-center py-12 text-gray-400">No logs available</div>
+        ) : (
+          logs.map((log, index) => (
+            <div key={index} className="mb-1 hover:bg-gray-800/50 px-2 py-1 rounded">
+              <span className="text-gray-500 dark:text-gray-400">[{log.timestamp}]</span>{' '}
+              <span className={`${getLevelColor(log.level)} dark:${getLevelColorDark(log.level)}`}>[{log.level.toUpperCase()}]</span>{' '}
+              <span className="text-gray-300 dark:text-gray-200">{log.message}</span>
+            </div>
+          ))
+        )}
         <div ref={logEndRef} />
       </div>
     </div>

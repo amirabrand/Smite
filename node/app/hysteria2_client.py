@@ -3,9 +3,12 @@ import asyncio
 import httpx
 import hashlib
 import socket
+import logging
 from pathlib import Path
 from typing import Optional
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class Hysteria2Client:
@@ -108,8 +111,7 @@ class Hysteria2Client:
                 logger.error(f"Registration failed: {response.status_code} - {response.text}")
                 return False
         except httpx.ConnectError as e:
-            logger.error(f"Cannot connect to panel at {panel_api_url}: {str(e)}")
-            print(f"   Make sure panel is running and accessible")
+            logger.error(f"Cannot connect to panel at {panel_api_url}: {str(e)}. Make sure panel is running and accessible")
             return False
         except Exception as e:
             logger.error(f"Registration error: {str(e)}")

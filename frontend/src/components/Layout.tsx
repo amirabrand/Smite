@@ -1,6 +1,6 @@
 import { ReactNode, useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Network, FileText, Activity, Moon, Sun, Github, Menu, X, LogOut } from 'lucide-react'
+import { LayoutDashboard, Network, FileText, Activity, Moon, Sun, Github, Menu, X, LogOut, Settings } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SmiteLogoDark from '../assets/SmiteD.png'
 import SmiteLogoLight from '../assets/SmiteL.png'
@@ -28,7 +28,6 @@ const Layout = ({ children }: LayoutProps) => {
     }
   }, [darkMode])
 
-  // Close sidebar when route changes on mobile
   useEffect(() => {
     setSidebarOpen(false)
   }, [location.pathname])
@@ -57,50 +56,36 @@ const Layout = ({ children }: LayoutProps) => {
             sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
           }`}
         >
-          <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between mb-4">
+          {/* Sidebar Header */}
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-6">
               <button
                 onClick={() => setSidebarOpen(false)}
                 className="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
               >
                 <X size={20} />
               </button>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setDarkMode(!darkMode)}
-                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
-                  title={darkMode ? 'Light mode' : 'Dark mode'}
-                >
-                  {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-                </button>
-                <button
-                  onClick={() => {
-                    logout()
-                    navigate('/login')
-                  }}
-                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
-                  title="Logout"
-                >
-                  <LogOut size={20} />
-                </button>
-              </div>
             </div>
-            <div className="flex flex-col items-center gap-3">
-              <img 
-                src={darkMode ? SmiteLogoDark : SmiteLogoLight} 
-                alt="Smite Logo" 
-                className="h-24 w-24 sm:h-32 sm:w-32"
-              />
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative">
+                <div className="absolute inset-0 bg-blue-500/20 dark:bg-blue-400/20 rounded-full blur-xl"></div>
+                <img 
+                  src={darkMode ? SmiteLogoDark : SmiteLogoLight} 
+                  alt="Smite Logo" 
+                  className="relative h-16 w-16"
+                />
+              </div>
               <div className="text-center">
-                <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Smite</h1>
-                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1">Control Panel</p>
+                <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">Smite</h1>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Control Panel</p>
                 {username && (
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Logged in as {username}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded">{username}</p>
                 )}
               </div>
             </div>
           </div>
           
+          {/* Navigation */}
           <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
             {navItems.map((item) => {
               const Icon = item.icon
@@ -109,22 +94,41 @@ const Layout = ({ children }: LayoutProps) => {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+                  className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
                     isActive
-                      ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 text-blue-600 dark:text-blue-400 shadow-sm'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                   }`}
                 >
-                  <Icon size={20} />
+                  <Icon size={20} className={isActive ? 'text-blue-600 dark:text-blue-400' : ''} />
                   <span className="font-medium">{item.label}</span>
                 </Link>
               )
             })}
           </nav>
           
-          {/* Footer */}
-          <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex flex-col items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          {/* Sidebar Footer */}
+          <div className="p-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+            <div className="flex items-center justify-between px-4 py-2">
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className="flex items-center gap-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+              >
+                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+                <span className="text-sm font-medium">{darkMode ? 'Light' : 'Dark'}</span>
+              </button>
+              <button
+                onClick={() => {
+                  logout()
+                  navigate('/login')
+                }}
+                className="flex items-center gap-2 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+              >
+                <LogOut size={18} />
+                <span className="text-sm font-medium">Logout</span>
+              </button>
+            </div>
+            <div className="flex flex-col items-center gap-2 text-xs text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-1 flex-wrap justify-center">
                 <span>Made with</span>
                 <span className="text-red-500">❤️</span>
@@ -147,7 +151,7 @@ const Layout = ({ children }: LayoutProps) => {
                   className="hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                   title="GitHub Repository"
                 >
-                  <Github size={16} />
+                  <Github size={14} />
                 </a>
               </div>
             </div>
@@ -157,15 +161,15 @@ const Layout = ({ children }: LayoutProps) => {
         {/* Main Content */}
         <main className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900">
           {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
+          <div className="lg:hidden sticky top-0 z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between shadow-sm">
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
             >
               <Menu size={24} />
             </button>
-            <h1 className="text-lg font-bold text-gray-900 dark:text-white">Smite</h1>
-            <div className="w-10" /> {/* Spacer for centering */}
+            <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">Smite</h1>
+            <div className="w-10" />
           </div>
           
           <div className="p-4 sm:p-6 lg:p-8">
@@ -178,4 +182,3 @@ const Layout = ({ children }: LayoutProps) => {
 }
 
 export default Layout
-
