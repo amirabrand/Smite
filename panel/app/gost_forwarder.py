@@ -77,7 +77,7 @@ class GostForwarder:
                     forward_port = "8080"
                 # WebSocket on listen side with explicit path, TCP on forward side
                 # Syntax: ws://listen/path/tcp://target
-                # Explicitly include / as the path for VLESS over WS
+                # For path=/ (root), use: ws://host:port//tcp://target (double slash means root path)
                 cmd = [
                     "/usr/local/bin/gost",
                     f"-L=ws://0.0.0.0:{local_port}//tcp://{forward_host}:{forward_port}"
