@@ -2,11 +2,36 @@
 
 <div align="center">
   <img src="assets/SmiteD.png" alt="Smite Logo" width="200"/>
+  
+  **A modern, Docker-first tunneling control panel for managing tunnels (TCP, UDP, WS, gRPC, TCPMux, Rathole).**
+  
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 </div>
 
-A modern, Docker-first tunneling control panel for managing tunnels (TCP, UDP, WS, gRPC, TCPMux, Rathole).
+---
 
-## Panel Installation
+## 🚀 Features
+
+- **Multiple Tunnel Types**: Support for TCP, UDP, WebSocket, gRPC, TCPMux, and Rathole
+- **Docker-First**: Easy deployment with Docker Compose
+- **Web UI**: Modern, intuitive web interface for tunnel management
+- **CLI Tools**: Powerful command-line tools for management
+- **Node Support**: Easy reverse tunnel setup with Rathole nodes
+- **GOST Forwarding**: Direct forwarding without nodes for better performance
+
+---
+
+## 📋 Prerequisites
+
+- Docker and Docker Compose installed
+- For Iran servers, install Docker first:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/manageitir/docker/main/install-ubuntu.sh | sh
+  ```
+
+---
+
+## 🔧 Panel Installation
 
 ### Quick Install
 
@@ -45,7 +70,11 @@ smite admin create
 
 6. Access the web interface at `http://localhost:8000`
 
-## Node Installation
+---
+
+## 🖥️ Node Installation
+
+> **Note**: Nodes are used for **Rathole** tunnels, providing easy reverse tunnel functionality. For GOST tunnels (TCP, UDP, WS, gRPC, TCPMux), you can forward directly without a node.
 
 ### Quick Install
 
@@ -87,7 +116,9 @@ EOF
 docker compose up -d
 ```
 
-## CLI Tools
+---
+
+## 🛠️ CLI Tools
 
 ### Panel CLI (`smite`)
 ```bash
@@ -104,12 +135,55 @@ smite-node update       # Update node
 smite-node logs         # View logs
 ```
 
-## License
+---
 
-MIT
+## 📖 Tunnel Types
+
+### GOST Tunnels (Direct Forwarding)
+- **TCP**: Simple TCP forwarding
+- **UDP**: UDP packet forwarding
+- **WebSocket**: WebSocket protocol forwarding
+- **gRPC**: gRPC protocol forwarding
+- **TCPMux**: TCP multiplexing for multiple connections
+
+These tunnels work directly without requiring a node - they forward traffic from the panel to the target server.
+
+### Rathole Tunnels (Reverse Tunnel)
+Rathole tunnels require a node and provide easy reverse tunnel functionality. The node connects to the panel, allowing you to expose services running on the node's network through the panel.
+
+---
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 💰 Donations
+
+If you find Smite useful and want to support its development, consider making a donation:
+
+### Cryptocurrency Donations
+
+- **Bitcoin (BTC)**: `bc1q637gahjssmv9g3903j88tn6uyy0w2pwuvsp5k0`
+- **Ethereum (ETH)**: `0x5B2eE8970E3B233F79D8c765E75f0705278098a0`
+- **Tron (TRX)**: `TSAsosG9oHMAjAr3JxPQStj32uAgAUmMp3`
+- **USDT (BEP20)**: `0x5B2eE8970E3B233F79D8c765E75f0705278098a0`
+- **TON**: `UQA-95WAUn_8pig7rsA9mqnuM5juEswKONSlu-jkbUBUhku6`
+
+### Other Ways to Support
+
+- ⭐ Star the repository if you find it useful
+- 🐛 Report bugs and suggest improvements
+- 📖 Improve documentation and translations
+- 🔗 Share with others who might benefit
 
 ---
 
 <div align="center">
-  Made with ❤️ by <a href="https://github.com/zZedix">zZedix</a> | v0.1.0
+  
+  **Made with ❤️ by [zZedix](https://github.com/zZedix)**
+  
+  *Securing the digital world, one line of code at a time!*
+  
 </div>
