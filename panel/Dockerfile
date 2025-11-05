@@ -93,7 +93,20 @@ RUN ARCH=$(uname -m) && \
     echo "Gost installed successfully at /usr/local/bin/gost" && \
     /usr/local/bin/gost -V || echo "Gost version check skipped"
 
-# Stage 3: Python dependencies (cached layer)
+# Stage 3: Frontend build (cached layer)
+FROM node:18-alpine AS frontend-build
+WORKDIR /app
+COPY ../frontend/package.json ../frontend/package-lock.json* ./
+RUN --mount=type=cache,target=/root/.npm \
+    if [ -f package-lock.json ]; then \
+        npm ci --prefer-offline --no-audit --no-fund; \
+    else \
+        npm install --prefer-offline --no-audit --no-fund; \
+    fi
+COPY ../frontend ./
+RUN npm run build
+
+# Stage 4: Python dependencies (cached layer)
 FROM base AS deps
 WORKDIR /app
 COPY requirements.txt .
@@ -101,7 +114,7 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
 
-# Stage 4: Final image
+# Stage 5: Final image
 FROM base
 WORKDIR /app
 
@@ -111,6 +124,9 @@ COPY --from=binaries /usr/local/bin/gost /usr/local/bin/gost
 
 # Copy Python dependencies from deps stage
 COPY --from=deps /usr/local /usr/local
+
+# Copy frontend build from frontend-build stage
+COPY --from=frontend-build /app/dist ./static
 
 # Copy application code (changes most frequently)
 COPY . .

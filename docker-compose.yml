@@ -16,7 +16,7 @@ services:
     volumes:
       - ./panel/data:/app/data
       - ./panel/certs:/app/certs
-      - ./frontend/dist:/app/static
+      # Frontend is now built into the image, no need to mount
     env_file:
       - .env
     environment:
