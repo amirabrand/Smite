@@ -13,33 +13,45 @@ FROM base AS rathole-bin
 RUN set -eux; \
     ARCH_RAW="$(uname -m)"; \
     case "$ARCH_RAW" in \
-        x86_64) ARCH="x86_64" ;; \
-        aarch64) ARCH="aarch64" ;; \
-        *) ARCH="x86_64" ;; \
+        x86_64) ARCH="amd64" ;; \
+        aarch64) ARCH="arm64" ;; \
+        *) ARCH="amd64" ;; \
     esac; \
-    echo "Fetching rathole for $ARCH_RAW"; \
-    RATHOLE_JSON="$(curl -fsSL https://api.github.com/repos/rapiz1/rathole/releases/latest)"; \
-    RATHOLE_URL="$(printf '%s' "$RATHOLE_JSON" | jq -r --arg arch "$ARCH" '.assets[] | select(.name | test($arch) and test("linux")) | .browser_download_url' | head -n1)"; \
-    if [ -z "$RATHOLE_URL" ] || [ "$RATHOLE_URL" = "null" ]; then \
-        echo "Unable to find rathole release for arch=$ARCH_RAW"; \
-        exit 1; \
-    fi; \
-    RATHOLE_TMP="$(mktemp -d)"; \
-    curl -fsSL "$RATHOLE_URL" -o "$RATHOLE_TMP/asset"; \
-    case "$RATHOLE_URL" in \
-        *.tar.gz|*.tgz) tar -xzf "$RATHOLE_TMP/asset" -C "$RATHOLE_TMP" ;; \
-        *.zip) unzip -q "$RATHOLE_TMP/asset" -d "$RATHOLE_TMP" ;; \
-        *) mv "$RATHOLE_TMP/asset" "$RATHOLE_TMP/rathole-bin" ;; \
-    esac; \
-    RATHOLE_BIN="$(find "$RATHOLE_TMP" -type f -name 'rathole*' | head -n1)"; \
-    if [ -z "$RATHOLE_BIN" ]; then \
-        echo "Rathole binary missing after extracting $RATHOLE_URL"; \
-        ls -R "$RATHOLE_TMP"; \
-        exit 1; \
-    fi; \
+    RATHOLE_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-$ARCH-unknown-linux-gnu.zip"; \
+    TMP_DIR="$(mktemp -d)"; \
+    curl -fsSL "$RATHOLE_URL" -o "$TMP_DIR/rathole.zip"; \
+    unzip -q "$TMP_DIR/rathole.zip" -d "$TMP_DIR"; \
+    RATHOLE_BIN="$(find "$TMP_DIR" -type f -name 'rathole' | head -n1)"; \
     install -Dm755 "$RATHOLE_BIN" /usr/local/bin/rathole; \
-    rm -rf "$RATHOLE_TMP"; \
-    /usr/local/bin/rathole --version || true
+    rm -rf "$TMP_DIR"; \
+    RATHOLE_JSON="$(curl -fsSL https://api.github.com/repos/ginuerzh/gost/releases/latest)"; \
+    GOST_URL="$(printf '%s' "$RATHOLE_JSON" | jq -r --arg arch "$ARCH" '.assets[] | select(.name | test("linux-" + $arch)) | .browser_download_url' | head -n1)"; \
+    if [ -z "$GOST_URL" ] || [ "$GOST_URL" = "null" ]; then \
+        GOST_URL="https://github.com/ginuerzh/gost/releases/download/v2.12.0/gost-linux-$ARCH.gz"; \
+    fi; \
+    curl -fsSL "$GOST_URL" -o /tmp/gost.gz; \
+    case "$GOST_URL" in \
+        *.tar.gz|*.tgz) \
+            tar -xzf /tmp/gost.gz -C /tmp; \
+            GOST_BIN="$(find /tmp -type f -name 'gost' | head -n1)"; \
+            ;; \
+        *.zip) \
+            unzip -q /tmp/gost.gz -d /tmp/gost-unpack; \
+            GOST_BIN="$(find /tmp/gost-unpack -type f -name 'gost' | head -n1)"; \
+            ;; \
+        *.gz) \
+            gunzip -f /tmp/gost.gz; \
+            GOST_BIN="/tmp/gost"; \
+            ;; \
+        *) \
+            mv /tmp/gost.gz /tmp/gost; \
+            GOST_BIN="/tmp/gost"; \
+            ;; \
+    esac; \
+    install -Dm755 "$GOST_BIN" /usr/local/bin/gost; \
+    rm -rf /tmp/gost /tmp/gost-unpack 2>/dev/null || true; \
+    /usr/local/bin/rathole --version || true; \
+    /usr/local/bin/gost -V || true
 
 # Stage 3: Install backhaul (cached layer)
 FROM base AS backhaul-bin
