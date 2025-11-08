@@ -102,9 +102,14 @@ ENV GOBIN=/usr/local/bin
 RUN apt-get update && apt-get install -y golang && rm -rf /var/lib/apt/lists/* && \
     GOBIN=/usr/local/bin go install ${BACKHAUL_MODULE}/cmd/backhaul@${BACKHAUL_VERSION} && \
     if [ ! -x /usr/local/bin/backhaul ]; then \
-        echo "Backhaul binary missing after installation"; \
-        ls -R $(go env GOPATH)/bin || true; \
-        exit 1; \
+        GOPATH_BIN=$(go env GOPATH)/bin/backhaul; \
+        if [ -f "$GOPATH_BIN" ]; then \
+            cp "$GOPATH_BIN" /usr/local/bin/backhaul; \
+        else \
+            echo "Backhaul binary missing after installation"; \
+            ls -R $(go env GOPATH)/bin || true; \
+            exit 1; \
+        fi; \
     fi && \
     chmod +x /usr/local/bin/backhaul && \
     /usr/local/bin/backhaul --version || true
