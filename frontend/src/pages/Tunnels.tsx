@@ -16,7 +16,7 @@ interface Tunnel {
   updated_at: string
 }
 
-type BackhaulTransport = 'tcp' | 'udp' | 'ws' | 'wsmux'
+type BackhaulTransport = 'tcp' | 'udp' | 'ws' | 'wsmux' | 'tcpmux'
 
 interface BackhaulFormState {
   transport: BackhaulTransport
@@ -524,7 +524,9 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
                 setBackhaulState((prev) => ({ ...prev, ...partial }))
               }}
               onOpenAdvanced={() => setShowBackhaulAdvanced(true)}
-              acceptUdpVisible={backhaulState.transport === 'tcp'}
+              acceptUdpVisible={
+                backhaulState.transport === 'tcp' || backhaulState.transport === 'tcpmux'
+              }
             />
           )}
           
@@ -880,7 +882,9 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
                 }
               }}
               onOpenAdvanced={() => setShowBackhaulAdvanced(true)}
-              acceptUdpVisible={backhaulState.transport === 'tcp'}
+              acceptUdpVisible={
+                backhaulState.transport === 'tcp' || backhaulState.transport === 'tcpmux'
+              }
             />
           )}
           
@@ -992,7 +996,7 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
   )
 }
 
-const BACKHAUL_TRANSPORTS: BackhaulTransport[] = ['tcp', 'udp', 'ws', 'wsmux']
+const BACKHAUL_TRANSPORTS: BackhaulTransport[] = ['tcp', 'udp', 'ws', 'wsmux', 'tcpmux']
 
 function BackhaulForm({
   state,
@@ -1574,7 +1578,7 @@ function buildBackhaulSpec(
   if (token) {
     spec.token = token
   }
-  if (base.accept_udp && transport === 'tcp') {
+  if (base.accept_udp && (transport === 'tcp' || transport === 'tcpmux')) {
     spec.accept_udp = true
   }
   if (Object.keys(serverOptions).length > 0) {

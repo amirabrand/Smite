@@ -1,10 +1,14 @@
+ARG BACKHAUL_VERSION=v0.2.2
+ARG BACKHAUL_SHA256_AMD64=961b6e1ab97e3ad0b7ce53ce1cf4954a39f770661d86f9471be21c5660760c6e
+ARG BACKHAUL_SHA256_ARM64=e6b15c24df69a6a39e8de33dbdf94f8f86ad08222f8d52826d0b49c9c058e994
+
 # Stage 1: System dependencies and binaries
 FROM python:3.11-slim AS base
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
     unzip \
-    jq \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Stage 2: Install rathole and gost (cached layer)
@@ -37,52 +41,30 @@ RUN set -eux; \
 
 # Stage 3: Install backhaul (cached layer)
 FROM base AS backhaul-bin
+ARG BACKHAUL_VERSION
+ARG BACKHAUL_SHA256_AMD64
+ARG BACKHAUL_SHA256_ARM64
 RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates; \
-    rm -rf /var/lib/apt/lists/*; \
     mkdir -p /opt/backhaul; \
     ARCH="$(uname -m)"; \
     case "$ARCH" in \
-        x86_64|amd64) PLATFORM="amd64" ;; \
-        aarch64|arm64) PLATFORM="arm64" ;; \
+        x86_64|amd64) PLATFORM="amd64"; EXPECTED_SHA="$BACKHAUL_SHA256_AMD64" ;; \
+        aarch64|arm64) PLATFORM="arm64"; EXPECTED_SHA="$BACKHAUL_SHA256_ARM64" ;; \
         *) echo "Unsupported architecture: $ARCH"; exit 1 ;; \
     esac; \
-    RELEASE_JSON="$(curl -fsSL https://api.github.com/repos/Musixal/Backhaul/releases/latest)"; \
-    ASSET_URL="$(printf '%s' "$RELEASE_JSON" | jq -r --arg platform "$PLATFORM" '.assets[] | select(.name | test("linux_" + $platform)) | .browser_download_url' | head -n1)"; \
-    if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then \
-        echo "Unable to find Backhaul release asset for platform: $PLATFORM"; \
+    ASSET_URL="https://github.com/Musixal/Backhaul/releases/download/${BACKHAUL_VERSION}/backhaul_linux_${PLATFORM}.tar.gz"; \
+    TMP_DIR="$(mktemp -d)"; \
+    curl -fsSL "$ASSET_URL" -o "$TMP_DIR/backhaul.tar.gz"; \
+    echo "${EXPECTED_SHA}  $TMP_DIR/backhaul.tar.gz" | sha256sum -c -; \
+    tar -xzf "$TMP_DIR/backhaul.tar.gz" -C "$TMP_DIR"; \
+    BIN_PATH="$(find "$TMP_DIR" -type f -name 'backhaul' | head -n1)"; \
+    if [ -z "$BIN_PATH" ]; then \
+        echo "Backhaul binary not found in archive"; \
+        ls -R "$TMP_DIR"; \
         exit 1; \
     fi; \
-    TMP_FILE="$(mktemp)"; \
-    curl -fsSL "$ASSET_URL" -o "$TMP_FILE"; \
-    FILE_NAME="$(basename "$ASSET_URL")"; \
-    case "$FILE_NAME" in \
-        *.tar.gz|*.tgz) \
-            tar -xzf "$TMP_FILE" -C /opt/backhaul; \
-            ;; \
-        *.zip) \
-            unzip -q "$TMP_FILE" -d /opt/backhaul; \
-            ;; \
-        *) \
-            mv "$TMP_FILE" /opt/backhaul/backhaul-download; \
-            ;; \
-    esac; \
-    if [ -f /opt/backhaul/backhaul-download ]; then \
-        mv /opt/backhaul/backhaul-download /opt/backhaul/backhaul; \
-    else \
-        BIN_PATH="$(find /opt/backhaul -maxdepth 1 -type f -name 'backhaul*' | head -n1)"; \
-        if [ -z "$BIN_PATH" ]; then \
-            echo "Backhaul binary not found after extracting $FILE_NAME"; \
-            ls -R /opt/backhaul; \
-            exit 1; \
-        fi; \
-        if [ "$BIN_PATH" != "/opt/backhaul/backhaul" ]; then \
-            mv "$BIN_PATH" /opt/backhaul/backhaul; \
-        fi; \
-    fi; \
-    chmod +x /opt/backhaul/backhaul; \
-    rm -f "$TMP_FILE" 2>/dev/null || true; \
+    install -Dm755 "$BIN_PATH" /opt/backhaul/backhaul; \
+    rm -rf "$TMP_DIR"; \
     /opt/backhaul/backhaul --version || true
 
 # Stage 4: Frontend build (cached layer)

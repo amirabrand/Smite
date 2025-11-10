@@ -1,5 +1,7 @@
 """Backhaul server management for panel"""
 import logging
+import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -37,14 +39,27 @@ class BackhaulManager:
         "so_rcvbuf",
         "so_sndbuf",
         "proxy_protocol",
-        "pprof",
     ]
 
-    def __init__(self):
-        self.config_dir = Path("/app/data/backhaul")
+    def __init__(
+        self,
+        config_dir: Optional[Path] = None,
+        binary_path: Optional[Path] = None,
+    ):
+        resolved_config = config_dir or Path(
+            os.environ.get("SMITE_BACKHAUL_CONFIG_DIR", "/app/data/backhaul")
+        )
+        self.config_dir = Path(resolved_config)
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.processes: Dict[str, subprocess.Popen] = {}
         self.log_handles: Dict[str, Any] = {}
+        default_binary = binary_path or Path(
+            os.environ.get("BACKHAUL_SERVER_BINARY", "/usr/local/bin/backhaul")
+        )
+        self.binary_candidates = [
+            Path(default_binary),
+            Path("backhaul"),
+        ]
 
     def start_server(self, tunnel_id: str, spec: dict) -> bool:
         """Start a Backhaul server for a tunnel"""
@@ -60,12 +75,7 @@ class BackhaulManager:
         if tunnel_id in self.processes:
             self.stop_server(tunnel_id)
 
-        binary_path = Path("/usr/local/bin/backhaul")
-        if not binary_path.exists():
-            binary_path = Path("backhaul")
-
-        if not binary_path.exists():
-            raise FileNotFoundError("Backhaul binary not found at /usr/local/bin/backhaul or in PATH")
+        binary_path = self._resolve_binary_path()
 
         log_fh = log_path.open("w", buffering=1)
         log_fh.write(f"Starting Backhaul server for tunnel {tunnel_id}\n")
@@ -156,7 +166,7 @@ class BackhaulManager:
             del self.log_handles[tunnel_id]
 
     def _build_server_config(self, spec: dict) -> str:
-        transport = spec.get("transport") or spec.get("type") or "tcp"
+        transport = (spec.get("transport") or spec.get("type") or "tcp").lower()
         server_options = dict(spec.get("server_options") or {})
 
         # UDP over TCP helper toggle
@@ -261,6 +271,19 @@ class BackhaulManager:
             lines.append("")
 
         return "\n".join(lines).strip() + "\n"
+
+    def _resolve_binary_path(self) -> Path:
+        for candidate in self.binary_candidates:
+            if candidate.exists():
+                return candidate
+
+        resolved = shutil.which("backhaul")
+        if resolved:
+            return Path(resolved)
+
+        raise FileNotFoundError(
+            "Backhaul binary not found. Expected at BACKHAUL_SERVER_BINARY, '/usr/local/bin/backhaul', or in PATH."
+        )
 
 
 backhaul_manager = BackhaulManager()

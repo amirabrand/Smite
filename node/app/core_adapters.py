@@ -1,12 +1,11 @@
 """Core adapters for different tunnel types"""
 from typing import Protocol, Dict, Any, Optional, List
-from abc import ABC, abstractmethod
 import subprocess
-import json
 import os
 import psutil
 import time
 from pathlib import Path
+import shutil
 
 
 class CoreAdapter(Protocol):
@@ -180,21 +179,38 @@ class BackhaulAdapter:
         "mss",
         "so_rcvbuf",
         "so_sndbuf",
+        "accept_udp",
     ]
 
-    def __init__(self):
-        self.config_dir = Path("/etc/smite-node/backhaul")
+    def __init__(
+        self,
+        config_dir: Optional[Path] = None,
+        binary_path: Optional[Path] = None,
+    ):
+        resolved_config = config_dir or Path(
+            os.environ.get("SMITE_BACKHAUL_CLIENT_DIR", "/etc/smite-node/backhaul")
+        )
+        self.config_dir = Path(resolved_config)
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.processes: Dict[str, subprocess.Popen] = {}
         self.usage_tracking: Dict[str, float] = {}
         self.log_handles: Dict[str, Any] = {}
+        default_binary = binary_path or Path(
+            os.environ.get("BACKHAUL_CLIENT_BINARY", "/usr/local/bin/backhaul")
+        )
+        self.binary_candidates = [
+            Path(default_binary),
+            Path("backhaul"),
+        ]
 
     def apply(self, tunnel_id: str, spec: Dict[str, Any]):
         remote_addr = spec.get("remote_addr") or spec.get("control_addr") or spec.get("bind_addr")
         if not remote_addr:
             raise ValueError("Backhaul requires 'remote_addr' in spec")
 
-        transport = spec.get("transport") or spec.get("type") or "tcp"
+        transport = (spec.get("transport") or spec.get("type") or "tcp").lower()
+        if transport not in {"tcp", "udp", "ws", "wsmux", "tcpmux"}:
+            raise ValueError(f"Unsupported Backhaul transport '{transport}'")
         client_options = dict(spec.get("client_options") or {})
 
         config_dict: Dict[str, Any] = {
@@ -221,14 +237,13 @@ class BackhaulAdapter:
         if "dial_timeout" not in config_dict:
             config_dict["dial_timeout"] = 10
 
+        if spec.get("accept_udp") and transport in {"tcp", "tcpmux"}:
+            config_dict["accept_udp"] = True
+
         config_path = self.config_dir / f"{tunnel_id}.toml"
         config_path.write_text(self._render_toml({"client": config_dict}), encoding="utf-8")
 
-        binary_path = Path("/usr/local/bin/backhaul")
-        if not binary_path.exists():
-            binary_path = Path("backhaul")
-        if not binary_path.exists():
-            raise FileNotFoundError("Backhaul binary not found in container")
+        binary_path = self._resolve_binary_path()
 
         log_path = self.config_dir / f"backhaul_{tunnel_id}.log"
         log_fh = log_path.open("w", buffering=1)
@@ -335,6 +350,19 @@ class BackhaulAdapter:
                 lines.append(f"{key} = {format_value(val)}")
             lines.append("")
         return "\n".join(lines).strip() + "\n"
+
+    def _resolve_binary_path(self) -> Path:
+        for candidate in self.binary_candidates:
+            if candidate.exists():
+                return candidate
+
+        resolved = shutil.which("backhaul")
+        if resolved:
+            return Path(resolved)
+
+        raise FileNotFoundError(
+            "Backhaul binary not found. Expected at BACKHAUL_CLIENT_BINARY, '/usr/local/bin/backhaul', or in PATH."
+        )
 
 
 class AdapterManager:
