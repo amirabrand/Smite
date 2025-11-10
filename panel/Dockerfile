@@ -1,99 +1,73 @@
+ARG BACKHAUL_VERSION=v0.7.2
+ARG BACKHAUL_SHA256_AMD64=57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc
+ARG BACKHAUL_SHA256_ARM64=9a424c97ff16fc3f682e8314c418790d2b5bf3136e008edbb6cd402ea00999f6
+
 # Stage 1: System dependencies and binaries
 FROM python:3.11-slim AS base
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
     unzip \
-    jq \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Stage 2: Install rathole and gost (cached layer)
 FROM base AS binaries
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; \
-    elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; \
-    else ARCH="amd64"; fi && \
-    echo "Getting latest rathole version..." && \
-    RATHOLE_VERSION=$(curl -sL https://api.github.com/repos/rapiz1/rathole/releases | jq -r '.[0].tag_name // "v0.5.0"') && \
-    echo "Downloading rathole ${RATHOLE_VERSION} for ${ARCH}..." && \
-    RATHOLE_ARCH=$(if [ "$ARCH" = "amd64" ]; then echo "x86_64"; elif [ "$ARCH" = "arm64" ]; then echo "aarch64"; else echo "x86_64"; fi) && \
-    RATHOLE_ASSET=$(curl -sL "https://api.github.com/repos/rapiz1/rathole/releases" | jq -r --arg arch "$RATHOLE_ARCH" '.[0].assets[] | select(.name | contains($arch) and (contains("linux-gnu") or contains("linux-musl"))) | .browser_download_url' | head -1) && \
-    if [ -z "$RATHOLE_ASSET" ] || [ "$RATHOLE_ASSET" = "null" ]; then \
-        echo "Error: Could not find rathole binary for ${ARCH}"; \
-        exit 1; \
-    fi && \
-    echo "Downloading from: $RATHOLE_ASSET" && \
-    if echo "$RATHOLE_ASSET" | grep -q "\.zip$"; then \
-        curl -L "$RATHOLE_ASSET" -o /tmp/rathole.zip -f && \
-        unzip -q /tmp/rathole.zip -d /tmp && \
-        rm /tmp/rathole.zip; \
-    else \
-        curl -L "$RATHOLE_ASSET" -o /tmp/rathole.tar.gz -f && \
-        tar -xzf /tmp/rathole.tar.gz -C /tmp && \
-        rm /tmp/rathole.tar.gz; \
-    fi && \
-    find /tmp -name "rathole" -type f -executable -exec mv {} /usr/local/bin/rathole \; && \
-    chmod +x /usr/local/bin/rathole && \
-    rm -rf /tmp/rathole* && \
-    rathole --version || echo "Rathole installed" && \
-    echo "Getting latest gost version..." && \
-    GOST_VERSION=$(curl -sL https://api.github.com/repos/ginuerzh/gost/releases | jq -r '.[0].tag_name // "v2.11.5"') && \
-    echo "Downloading gost ${GOST_VERSION} for ${ARCH}..." && \
-    # Query GitHub API for the correct asset URL
-    GOST_ASSET=$(curl -sL "https://api.github.com/repos/ginuerzh/gost/releases" | jq -r --arg arch "$ARCH" '.[0].assets[] | select(.name | contains("linux") and contains($arch)) | .browser_download_url' | head -1) && \
-    if [ -z "$GOST_ASSET" ] || [ "$GOST_ASSET" = "null" ]; then \
-        echo "Error: Could not find gost binary for ${ARCH}"; \
-        exit 1; \
-    fi && \
-    echo "Downloading from: $GOST_ASSET" && \
-    if ! curl -L "$GOST_ASSET" -o /tmp/gost-download -f; then \
-        echo "Error: Failed to download gost from $GOST_ASSET"; \
-        exit 1; \
-    fi && \
-    if echo "$GOST_ASSET" | grep -q "\.gz$" && ! echo "$GOST_ASSET" | grep -q "\.tar\.gz"; then \
-        if ! gunzip /tmp/gost-download; then \
-            echo "Error: Failed to gunzip gost"; \
-            exit 1; \
-        fi && \
-        mv /tmp/gost-download /usr/local/bin/gost; \
-    elif echo "$GOST_ASSET" | grep -q "\.zip$"; then \
-        if ! unzip -q /tmp/gost-download -d /tmp; then \
-            echo "Error: Failed to unzip gost"; \
-            exit 1; \
-        fi && \
-        GOST_BIN=$(find /tmp -name "gost" -type f -executable | head -1) && \
-        if [ -z "$GOST_BIN" ]; then \
-            echo "Error: Could not find gost binary in archive"; \
-            exit 1; \
-        fi && \
-        mv "$GOST_BIN" /usr/local/bin/gost && \
-        rm -rf /tmp/gost* /tmp/gost-download; \
-    elif echo "$GOST_ASSET" | grep -q "\.tar\.gz$"; then \
-        mv /tmp/gost-download /tmp/gost.tar.gz && \
-        if ! tar -xzf /tmp/gost.tar.gz -C /tmp; then \
-            echo "Error: Failed to extract gost tar.gz"; \
-            exit 1; \
-        fi && \
-        GOST_BIN=$(find /tmp -name "gost" -type f -executable | head -1) && \
-        if [ -z "$GOST_BIN" ]; then \
-            echo "Error: Could not find gost binary in archive"; \
-            exit 1; \
-        fi && \
-        mv "$GOST_BIN" /usr/local/bin/gost && \
-        rm -rf /tmp/gost* /tmp/gost.tar.gz; \
-    else \
-        mv /tmp/gost-download /usr/local/bin/gost; \
-    fi && \
-    chmod +x /usr/local/bin/gost && \
-    rm -f /tmp/gost-download /tmp/gost.tar.gz && \
-    if [ ! -f /usr/local/bin/gost ]; then \
-        echo "Error: gost binary not found at /usr/local/bin/gost after installation"; \
-        exit 1; \
-    fi && \
-    echo "Gost installed successfully at /usr/local/bin/gost" && \
-    /usr/local/bin/gost -V || echo "Gost version check skipped"
+RUN set -eux; \
+    ARCH_RAW="$(uname -m)"; \
+    case "$ARCH_RAW" in \
+        x86_64) ARCH="amd64"; RATHOLE_ARCH="x86_64" ;; \
+        aarch64) ARCH="arm64"; RATHOLE_ARCH="aarch64" ;; \
+        *) ARCH="amd64"; RATHOLE_ARCH="x86_64" ;; \
+    esac; \
+    echo "Fetching rathole release"; \
+    RATHOLE_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-$RATHOLE_ARCH-unknown-linux-gnu.zip"; \
+    RATHOLE_TMP="$(mktemp -d)"; \
+    curl -fsSL "$RATHOLE_URL" -o "$RATHOLE_TMP/asset"; \
+    unzip -q "$RATHOLE_TMP/asset" -d "$RATHOLE_TMP"; \
+    RATHOLE_BIN="$(find "$RATHOLE_TMP" -type f -name 'rathole' | head -n1)"; \
+    install -Dm755 "$RATHOLE_BIN" /usr/local/bin/rathole; \
+    rm -rf "$RATHOLE_TMP"; \
+    echo "Fetching gost release"; \
+    GOST_URL="https://github.com/ginuerzh/gost/releases/download/v2.12.0/gost_2.12.0_linux_${ARCH}.tar.gz"; \
+    GOST_TMP="$(mktemp -d)"; \
+    curl -fsSL "$GOST_URL" -o "$GOST_TMP/gost.tar.gz"; \
+    tar -xzf "$GOST_TMP/gost.tar.gz" -C "$GOST_TMP"; \
+    GOST_BIN="$(find "$GOST_TMP" -type f -name 'gost' | head -n1)"; \
+    install -Dm755 "$GOST_BIN" /usr/local/bin/gost; \
+    rm -rf "$GOST_TMP"; \
+    /usr/local/bin/rathole --version || true; \
+    /usr/local/bin/gost -V || true
 
-# Stage 3: Frontend build (cached layer)
+# Stage 3: Install backhaul (cached layer)
+FROM base AS backhaul-bin
+ARG BACKHAUL_VERSION
+ARG BACKHAUL_SHA256_AMD64
+ARG BACKHAUL_SHA256_ARM64
+RUN set -eux; \
+    mkdir -p /opt/backhaul; \
+    ARCH="$(uname -m)"; \
+    case "$ARCH" in \
+        x86_64|amd64) PLATFORM="amd64"; EXPECTED_SHA="$BACKHAUL_SHA256_AMD64" ;; \
+        aarch64|arm64) PLATFORM="arm64"; EXPECTED_SHA="$BACKHAUL_SHA256_ARM64" ;; \
+        *) echo "Unsupported architecture: $ARCH"; exit 1 ;; \
+    esac; \
+    ASSET_URL="https://github.com/Musixal/Backhaul/releases/download/${BACKHAUL_VERSION}/backhaul_linux_${PLATFORM}.tar.gz"; \
+    TMP_DIR="$(mktemp -d)"; \
+    curl -fsSL "$ASSET_URL" -o "$TMP_DIR/backhaul.tar.gz"; \
+    echo "${EXPECTED_SHA}  $TMP_DIR/backhaul.tar.gz" | sha256sum -c -; \
+    tar -xzf "$TMP_DIR/backhaul.tar.gz" -C "$TMP_DIR"; \
+    BIN_PATH="$(find "$TMP_DIR" -type f -name 'backhaul' | head -n1)"; \
+    if [ -z "$BIN_PATH" ]; then \
+        echo "Backhaul binary not found in archive"; \
+        ls -R "$TMP_DIR"; \
+        exit 1; \
+    fi; \
+    install -Dm755 "$BIN_PATH" /opt/backhaul/backhaul; \
+    rm -rf "$TMP_DIR"; \
+    /opt/backhaul/backhaul --version || true
+
+# Stage 4: Frontend build (cached layer)
 FROM node:18-alpine AS frontend-build
 WORKDIR /app
 # Build context is now root, so frontend/ is directly accessible
@@ -107,7 +81,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY frontend ./
 RUN npm run build
 
-# Stage 4: Python dependencies (cached layer)
+# Stage 5: Python dependencies (cached layer)
 FROM base AS deps
 WORKDIR /app
 COPY panel/requirements.txt .
@@ -115,13 +89,14 @@ COPY panel/requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
 
-# Stage 5: Final image
+# Stage 6: Final image
 FROM base
 WORKDIR /app
 
 # Copy binaries from binaries stage
 COPY --from=binaries /usr/local/bin/rathole /usr/local/bin/rathole
 COPY --from=binaries /usr/local/bin/gost /usr/local/bin/gost
+COPY --from=backhaul-bin /opt/backhaul/backhaul /usr/local/bin/backhaul
 
 # Copy Python dependencies from deps stage
 COPY --from=deps /usr/local /usr/local

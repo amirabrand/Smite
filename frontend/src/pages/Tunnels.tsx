@@ -16,6 +16,160 @@ interface Tunnel {
   updated_at: string
 }
 
+type BackhaulTransport = 'tcp' | 'udp' | 'ws' | 'wsmux' | 'tcpmux'
+
+interface BackhaulFormState {
+  transport: BackhaulTransport
+  control_port: string
+  public_port: string
+  listen_ip: string
+  public_host: string
+  remote_addr: string
+  target_host: string
+  target_port: string
+  token: string
+  accept_udp: boolean
+}
+
+interface BackhaulAdvancedServerState {
+  keepalive_period: string
+  heartbeat: string
+  channel_size: string
+  mux_con: string
+  log_level: string
+  nodelay: boolean
+  skip_optz: boolean
+  tls_cert: string
+  tls_key: string
+  sniffer: boolean
+  web_port: string
+  proxy_protocol: boolean
+}
+
+interface BackhaulAdvancedClientState {
+  connection_pool: string
+  retry_interval: string
+  dial_timeout: string
+  keepalive_period: string
+  log_level: string
+  nodelay: boolean
+  aggressive_pool: boolean
+  edge_ip: string
+  skip_optz: boolean
+}
+
+interface BackhaulAdvancedState {
+  server: BackhaulAdvancedServerState
+  client: BackhaulAdvancedClientState
+  customPorts: string
+}
+
+const createDefaultBackhaulState = (): BackhaulFormState => ({
+  transport: 'tcp',
+  control_port: '3080',
+  public_port: '443',
+  listen_ip: '0.0.0.0',
+  public_host: '',
+  remote_addr: '',
+  target_host: '127.0.0.1',
+  target_port: '8080',
+  token: '',
+  accept_udp: false,
+})
+
+const createDefaultBackhaulAdvancedState = (): BackhaulAdvancedState => ({
+  server: {
+    keepalive_period: '75',
+    heartbeat: '40',
+    channel_size: '2048',
+    mux_con: '8',
+    log_level: 'info',
+    nodelay: true,
+    skip_optz: false,
+    tls_cert: '',
+    tls_key: '',
+    sniffer: false,
+    web_port: '',
+    proxy_protocol: false,
+  },
+  client: {
+    connection_pool: '4',
+    retry_interval: '3',
+    dial_timeout: '10',
+    keepalive_period: '75',
+    log_level: 'info',
+    nodelay: true,
+    aggressive_pool: false,
+    edge_ip: '',
+    skip_optz: false,
+  },
+  customPorts: '',
+})
+
+const numericServerKeys = new Set([
+  'keepalive_period',
+  'heartbeat',
+  'channel_size',
+  'mux_con',
+  'web_port',
+])
+const booleanServerKeys = new Set(['nodelay', 'skip_optz', 'sniffer', 'proxy_protocol'])
+const stringServerKeys = new Set(['log_level', 'tls_cert', 'tls_key', 'sniffer_log'])
+
+const numericClientKeys = new Set(['connection_pool', 'retry_interval', 'dial_timeout', 'keepalive_period'])
+const booleanClientKeys = new Set(['nodelay', 'aggressive_pool', 'skip_optz'])
+const stringClientKeys = new Set(['log_level', 'edge_ip'])
+
+interface BackhaulDisplayInfo {
+  controlPort: string
+  publicPort: string
+  target: string
+}
+
+const getBackhaulDisplayInfo = (spec: Record<string, any> | undefined): BackhaulDisplayInfo => {
+  if (!spec) {
+    return { controlPort: 'N/A', publicPort: 'N/A', target: 'N/A' }
+  }
+
+  const controlPort =
+    spec.control_port ||
+    (typeof spec.bind_addr === 'string' && spec.bind_addr.includes(':') ? spec.bind_addr.split(':').pop() : undefined) ||
+    (typeof spec.remote_addr === 'string' && spec.remote_addr.includes(':') ? spec.remote_addr.split(':').pop() : undefined) ||
+    'N/A'
+
+  const publicPort =
+    spec.public_port ||
+    spec.listen_port ||
+    (Array.isArray(spec.ports) && spec.ports.length > 0
+      ? (() => {
+          const [first] = spec.ports
+          if (typeof first !== 'string') return undefined
+          const [left] = first.split('=')
+          const parts = left.split(':')
+          return parts.pop()
+        })()
+      : undefined) ||
+    'N/A'
+
+  const target =
+    spec.target_addr ||
+    (Array.isArray(spec.ports) && spec.ports.length > 0
+      ? (() => {
+          const [first] = spec.ports
+          if (typeof first !== 'string') return undefined
+          const segments = first.split('=')
+          return segments.length > 1 ? segments[1] : undefined
+        })()
+      : undefined) ||
+    'N/A'
+
+  return {
+    controlPort: controlPort?.toString() || 'N/A',
+    publicPort: publicPort?.toString() || 'N/A',
+    target: target?.toString() || 'N/A',
+  }
+}
+
 const Tunnels = () => {
   const [tunnels, setTunnels] = useState<Tunnel[]>([])
   const [nodes, setNodes] = useState<any[]>([])
@@ -181,6 +335,29 @@ const Tunnels = () => {
                   </span>
                 </div>
               )}
+              {tunnel.core === 'backhaul' && (
+                <>
+                  {(() => {
+                    const info = getBackhaulDisplayInfo(tunnel.spec)
+                    return (
+                      <>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700">
+                          <span className="text-sm text-gray-500 dark:text-gray-400">Control Port</span>
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">{info.controlPort}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700">
+                          <span className="text-sm text-gray-500 dark:text-gray-400">Public Port</span>
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">{info.publicPort}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700">
+                          <span className="text-sm text-gray-500 dark:text-gray-400">Target</span>
+                          <span className="text-sm font-medium text-gray-900 dark:text-white break-all ml-2">{info.target}</span>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </>
+              )}
             </div>
 
           </div>
@@ -233,12 +410,16 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
     rathole_remote_addr: tunnel.spec?.remote_addr ? (tunnel.spec.remote_addr.includes(':') ? tunnel.spec.remote_addr.split(':')[1] : tunnel.spec.remote_addr) : '',
     rathole_local_port: tunnel.spec?.local_addr ? tunnel.spec.local_addr.split(':')[1] : '',
   })
+  const parsedBackhaul = parseBackhaulSpec(tunnel.spec, tunnel.type)
+  const [backhaulState, setBackhaulState] = useState<BackhaulFormState>(parsedBackhaul.state)
+  const [backhaulAdvanced, setBackhaulAdvanced] = useState<BackhaulAdvancedState>(parsedBackhaul.advanced)
+  const [showBackhaulAdvanced, setShowBackhaulAdvanced] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       // Build updated spec
-      const updatedSpec = { ...tunnel.spec }
+      let updatedSpec = { ...tunnel.spec }
       
       if (tunnel.core === 'rathole') {
         if (formData.rathole_remote_addr) {
@@ -263,6 +444,8 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
         updatedSpec.listen_port = port
         // Also set forward_to for backward compatibility
         updatedSpec.forward_to = `${remoteIp}:${port}`
+      } else if (tunnel.core === 'backhaul') {
+        updatedSpec = buildBackhaulSpec(backhaulState, backhaulAdvanced, tunnel.type as BackhaulTransport)
       }
 
       await api.put(`/tunnels/${tunnel.id}`, {
@@ -332,6 +515,19 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
                 </p>
               </div>
             </>
+          )}
+          
+          {tunnel.core === 'backhaul' && (
+            <BackhaulForm
+              state={backhaulState}
+              onChange={(partial) => {
+                setBackhaulState((prev) => ({ ...prev, ...partial }))
+              }}
+              onOpenAdvanced={() => setShowBackhaulAdvanced(true)}
+              acceptUdpVisible={
+                backhaulState.transport === 'tcp' || backhaulState.transport === 'tcpmux'
+              }
+            />
           )}
           
           {tunnel.core === 'rathole' && (
@@ -411,6 +607,12 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
             </button>
           </div>
         </form>
+        <BackhaulAdvancedDrawer
+          open={showBackhaulAdvanced}
+          state={backhaulAdvanced}
+          onClose={() => setShowBackhaulAdvanced(false)}
+          onChange={setBackhaulAdvanced}
+        />
       </div>
     </div>
   )
@@ -435,11 +637,15 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
     rathole_local_port: '8080',
     spec: {} as Record<string, any>,
   })
+  const [backhaulState, setBackhaulState] = useState<BackhaulFormState>(createDefaultBackhaulState())
+  const [backhaulAdvanced, setBackhaulAdvanced] = useState<BackhaulAdvancedState>(createDefaultBackhaulAdvancedState())
+  const [showBackhaulAdvanced, setShowBackhaulAdvanced] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      const spec = getSpecForType(formData.core, formData.type)
+      let spec = getSpecForType(formData.core, formData.type)
+      let tunnelType = formData.type
       
       // For GOST tunnels (TCP/UDP/gRPC/TCPMux), set remote_ip and remote_port (Shifter pattern)
       if (formData.core === 'xray' && (formData.type === 'tcp' || formData.type === 'udp' || formData.type === 'grpc' || formData.type === 'tcpmux')) {
@@ -466,10 +672,19 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
         spec.listen_port = port
       }
       
+      if (formData.core === 'backhaul') {
+        if (!formData.node_id) {
+          alert('Backhaul tunnels require a node')
+          return
+        }
+        spec = buildBackhaulSpec(backhaulState, backhaulAdvanced)
+        tunnelType = backhaulState.transport
+      }
+      
       const payload = {
         name: formData.name,
         core: formData.core,
-        type: formData.type,
+        type: tunnelType,
         node_id: formData.node_id || null,  // null for GOST tunnels (no node needed)
         spec: spec,
       }
@@ -507,7 +722,9 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
     let newType = formData.type
     if (core === 'rathole') {
       newType = core // Type matches core for rathole
-    } else if (formData.type === 'rathole') {
+    } else if (core === 'backhaul') {
+      newType = backhaulState.transport
+    } else if (formData.type === 'rathole' || formData.core === 'backhaul') {
       newType = 'tcp' // Reset to default GOST type
     }
     setFormData({ ...formData, core, type: newType })
@@ -548,7 +765,7 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
                   value={formData.node_id}
                   onChange={(e) => setFormData({ ...formData, node_id: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-                  required={formData.core === 'rathole'}
+                required={formData.core === 'rathole' || formData.core === 'backhaul'}
                 >
                   <option value="">Select a node</option>
                   {nodes.map((node) => (
@@ -573,6 +790,7 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
               >
                 <option value="xray">GOST</option>
                 <option value="rathole">Rathole</option>
+                <option value="backhaul">Backhaul</option>
               </select>
             </div>
             <div>
@@ -581,12 +799,26 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
               </label>
               <select
                 value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                onChange={(e) => {
+                  const value = e.target.value as BackhaulTransport
+                  setFormData({ ...formData, type: value })
+                  if (formData.core === 'backhaul') {
+                    setBackhaulState((prev) => ({ ...prev, transport: value }))
+                  }
+                }}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
                 disabled={formData.core === 'rathole'}
               >
                 {formData.core === 'rathole' ? (
                   <option value={formData.core}>{formData.core.charAt(0).toUpperCase() + formData.core.slice(1)}</option>
+                ) : formData.core === 'backhaul' ? (
+                  <>
+                    <option value="tcp">TCP</option>
+                    <option value="udp">UDP</option>
+                    <option value="ws">WebSocket (WS)</option>
+                    <option value="wsmux">WebSocket Mux</option>
+                    <option value="tcpmux">TCPMux</option>
+                  </>
                 ) : (
                   <>
                     <option value="tcp">TCP</option>
@@ -639,6 +871,22 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
                 </p>
               </div>
             </div>
+          )}
+          
+          {formData.core === 'backhaul' && (
+            <BackhaulForm
+              state={backhaulState}
+              onChange={(partial) => {
+                setBackhaulState((prev) => ({ ...prev, ...partial }))
+                if (partial.transport) {
+                  setFormData((prev) => ({ ...prev, type: partial.transport as string }))
+                }
+              }}
+              onOpenAdvanced={() => setShowBackhaulAdvanced(true)}
+              acceptUdpVisible={
+                backhaulState.transport === 'tcp' || backhaulState.transport === 'tcpmux'
+              }
+            />
           )}
           
           {formData.core === 'rathole' && (
@@ -738,10 +986,727 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
             </button>
           </div>
         </form>
+        <BackhaulAdvancedDrawer
+          open={showBackhaulAdvanced}
+          state={backhaulAdvanced}
+          onClose={() => setShowBackhaulAdvanced(false)}
+          onChange={setBackhaulAdvanced}
+        />
       </div>
     </div>
   )
 }
 
-export default Tunnels
+const BACKHAUL_TRANSPORTS: BackhaulTransport[] = ['tcp', 'udp', 'ws', 'wsmux', 'tcpmux']
 
+function BackhaulForm({
+  state,
+  onChange,
+  onOpenAdvanced,
+  acceptUdpVisible,
+}: {
+  state: BackhaulFormState
+  onChange: (partial: Partial<BackhaulFormState>) => void
+  onOpenAdvanced: () => void
+  acceptUdpVisible?: boolean
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Control Port
+          </label>
+          <input
+            type="number"
+            value={state.control_port}
+            onChange={(e) => onChange({ control_port: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            placeholder="3080"
+            min={1}
+            max={65535}
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Port where the node connects back to the panel.
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Public Host
+          </label>
+          <input
+            type="text"
+            value={state.public_host}
+            onChange={(e) => onChange({ public_host: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            placeholder={typeof window !== 'undefined' ? window.location.hostname : 'panel.example.com'}
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Hostname clients and nodes will use (defaults to current hostname).
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Public Port
+          </label>
+          <input
+            type="number"
+            value={state.public_port}
+            onChange={(e) => onChange({ public_port: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            placeholder="443"
+            min={1}
+            max={65535}
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Port exposed on the panel for clients.
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Bind IP (Public)
+          </label>
+          <input
+            type="text"
+            value={state.listen_ip}
+            onChange={(e) => onChange({ listen_ip: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            placeholder="0.0.0.0"
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Optional specific IP for public listeners (default 0.0.0.0).
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Target Host
+          </label>
+          <input
+            type="text"
+            value={state.target_host}
+            onChange={(e) => onChange({ target_host: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            placeholder="127.0.0.1"
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Destination host reachable from the node.
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Target Port
+          </label>
+          <input
+            type="number"
+            value={state.target_port}
+            onChange={(e) => onChange({ target_port: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            placeholder="8080"
+            min={1}
+            max={65535}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Override Control Address
+          </label>
+          <input
+            type="text"
+            value={state.remote_addr}
+            onChange={(e) => onChange({ remote_addr: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            placeholder="panel.example.com:3080"
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Optional: override the control address the node should dial.
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Token
+          </label>
+          <input
+            type="text"
+            value={state.token}
+            onChange={(e) => onChange({ token: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+            placeholder="Optional authentication token"
+          />
+        </div>
+      </div>
+
+      {acceptUdpVisible && (
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Allow UDP over TCP
+          </label>
+          <input
+            type="checkbox"
+            checked={state.accept_udp}
+            onChange={() => onChange({ accept_udp: !state.accept_udp })}
+            className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500"
+          />
+        </div>
+      )}
+
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={onOpenAdvanced}
+          className="px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          Advanced settings
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function BackhaulAdvancedDrawer({
+  open,
+  onClose,
+  state,
+  onChange,
+}: {
+  open: boolean
+  onClose: () => void
+  state: BackhaulAdvancedState
+  onChange: (next: BackhaulAdvancedState) => void
+}) {
+  if (!open) {
+    return null
+  }
+
+  const updateServer = (key: keyof BackhaulAdvancedServerState, value: string | boolean) => {
+    onChange({
+      ...state,
+      server: {
+        ...state.server,
+        [key]: value,
+      },
+    })
+  }
+
+  const updateClient = (key: keyof BackhaulAdvancedClientState, value: string | boolean) => {
+    onChange({
+      ...state,
+      client: {
+        ...state.client,
+        [key]: value,
+      },
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black bg-opacity-40" onClick={onClose} />
+      <div className="w-full max-w-xl h-full bg-white dark:bg-gray-900 shadow-xl overflow-y-auto p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Backhaul Advanced Settings</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-3">
+              Server Options
+            </h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Keepalive (s)</label>
+                <input
+                  type="number"
+                  value={state.server.keepalive_period}
+                  onChange={(e) => updateServer('keepalive_period', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  min={1}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Heartbeat (s)</label>
+                <input
+                  type="number"
+                  value={state.server.heartbeat}
+                  onChange={(e) => updateServer('heartbeat', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  min={1}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Channel Size</label>
+                <input
+                  type="number"
+                  value={state.server.channel_size}
+                  onChange={(e) => updateServer('channel_size', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  min={1}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Mux Concurrency</label>
+                <input
+                  type="number"
+                  value={state.server.mux_con}
+                  onChange={(e) => updateServer('mux_con', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  min={1}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Log Level</label>
+                <select
+                  value={state.server.log_level}
+                  onChange={(e) => updateServer('log_level', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                >
+                  <option value="panic">panic</option>
+                  <option value="fatal">fatal</option>
+                  <option value="error">error</option>
+                  <option value="warn">warn</option>
+                  <option value="info">info</option>
+                  <option value="debug">debug</option>
+                  <option value="trace">trace</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Web UI Port</label>
+                <input
+                  type="number"
+                  value={state.server.web_port}
+                  onChange={(e) => updateServer('web_port', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  placeholder="0 (disable)"
+                  min={0}
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">Enable Sniffer</label>
+                <input
+                  type="checkbox"
+                  checked={state.server.sniffer}
+                  onChange={() => updateServer('sniffer', !state.server.sniffer)}
+                  className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sniffer Log Path</label>
+                <input
+                  type="text"
+                  value={state.server.sniffer_log}
+                  onChange={(e) => updateServer('sniffer_log', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  placeholder="/var/log/backhaul.json"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">TLS Certificate Path</label>
+                <input
+                  type="text"
+                  value={state.server.tls_cert}
+                  onChange={(e) => updateServer('tls_cert', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">TLS Key Path</label>
+                <input
+                  type="text"
+                  value={state.server.tls_key}
+                  onChange={(e) => updateServer('tls_key', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">Disable Optimizations</label>
+                <input
+                  type="checkbox"
+                  checked={state.server.skip_optz}
+                  onChange={() => updateServer('skip_optz', !state.server.skip_optz)}
+                  className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500"
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">Enable Proxy Protocol</label>
+                <input
+                  type="checkbox"
+                  checked={state.server.proxy_protocol}
+                  onChange={() => updateServer('proxy_protocol', !state.server.proxy_protocol)}
+                  className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500"
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">TCP Nodelay</label>
+                <input
+                  type="checkbox"
+                  checked={state.server.nodelay}
+                  onChange={() => updateServer('nodelay', !state.server.nodelay)}
+                  className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-3">
+              Client Options
+            </h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Connection Pool</label>
+                <input
+                  type="number"
+                  value={state.client.connection_pool}
+                  onChange={(e) => updateClient('connection_pool', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  min={1}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Retry Interval (s)</label>
+                <input
+                  type="number"
+                  value={state.client.retry_interval}
+                  onChange={(e) => updateClient('retry_interval', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  min={1}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Dial Timeout (s)</label>
+                <input
+                  type="number"
+                  value={state.client.dial_timeout}
+                  onChange={(e) => updateClient('dial_timeout', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  min={1}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Keepalive (s)</label>
+                <input
+                  type="number"
+                  value={state.client.keepalive_period}
+                  onChange={(e) => updateClient('keepalive_period', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  min={1}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Log Level</label>
+                <select
+                  value={state.client.log_level}
+                  onChange={(e) => updateClient('log_level', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                >
+                  <option value="panic">panic</option>
+                  <option value="fatal">fatal</option>
+                  <option value="error">error</option>
+                  <option value="warn">warn</option>
+                  <option value="info">info</option>
+                  <option value="debug">debug</option>
+                  <option value="trace">trace</option>
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Edge IP (for WS/WSS)</label>
+                <input
+                  type="text"
+                  value={state.client.edge_ip}
+                  onChange={(e) => updateClient('edge_ip', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+                  placeholder="Optional CDN edge IP"
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">Aggressive Pool</label>
+                <input
+                  type="checkbox"
+                  checked={state.client.aggressive_pool}
+                  onChange={() => updateClient('aggressive_pool', !state.client.aggressive_pool)}
+                  className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500"
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">TCP Nodelay</label>
+                <input
+                  type="checkbox"
+                  checked={state.client.nodelay}
+                  onChange={() => updateClient('nodelay', !state.client.nodelay)}
+                  className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500"
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">Disable Optimizations</label>
+                <input
+                  type="checkbox"
+                  checked={state.client.skip_optz}
+                  onChange={() => updateClient('skip_optz', !state.client.skip_optz)}
+                  className="h-4 w-4 text-blue-600 rounded border-gray-300 dark:border-gray-600 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-3">
+              Custom Ports
+            </h4>
+            <textarea
+              value={state.customPorts}
+              onChange={(e) => onChange({ ...state, customPorts: e.target.value })}
+              className="w-full min-h-[120px] px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
+              placeholder={`One entry per line. Examples:\n443\n443=127.0.0.1:8080\n2000-2100=127.0.0.1:22`}
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Format matches Backhaul ports syntax. Leave empty to use the single public port above.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function buildBackhaulSpec(
+  base: BackhaulFormState,
+  advanced: BackhaulAdvancedState,
+  transportOverride?: BackhaulTransport,
+): Record<string, any> {
+  const transport = transportOverride ?? base.transport
+  const controlPort = parseInt(base.control_port, 10)
+  const publicPort = parseInt(base.public_port, 10)
+  const targetPort = parseInt(base.target_port, 10)
+  const listenIp = base.listen_ip.trim() || '0.0.0.0'
+  const targetHost = base.target_host.trim() || '127.0.0.1'
+  const token = base.token.trim()
+  const panelHost = base.public_host.trim() || (typeof window !== 'undefined' ? window.location.hostname : '') || '127.0.0.1'
+
+  const effectiveControlPort = !Number.isNaN(controlPort) && controlPort > 0
+    ? controlPort
+    : (!Number.isNaN(publicPort) && publicPort > 0
+        ? publicPort
+        : (!Number.isNaN(targetPort) && targetPort > 0 ? targetPort : 3080))
+  const effectivePublicPort = !Number.isNaN(publicPort) && publicPort > 0 ? publicPort : effectiveControlPort
+  const effectiveTargetPort = !Number.isNaN(targetPort) && targetPort > 0 ? targetPort : effectivePublicPort
+
+  const remoteAddr = base.remote_addr.trim() || `${panelHost}:${effectiveControlPort}`
+  const listenedPort = listenIp !== '0.0.0.0' ? `${listenIp}:${effectivePublicPort}` : `${effectivePublicPort}`
+  const defaultPortEntry = `${listenedPort}=${targetHost}:${effectiveTargetPort}`
+
+  const ports = advanced.customPorts
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (ports.length === 0) {
+    ports.push(defaultPortEntry)
+  }
+
+  const serverOptions: Record<string, any> = {}
+  Object.entries(advanced.server).forEach(([key, value]) => {
+    if (booleanServerKeys.has(key)) {
+      if (value) {
+        serverOptions[key] = true
+      }
+      return
+    }
+    if (numericServerKeys.has(key)) {
+      const num = Number(value)
+      if (!Number.isNaN(num) && value !== '') {
+        serverOptions[key] = num
+      }
+      return
+    }
+    if (stringServerKeys.has(key)) {
+      const val = typeof value === 'string' ? value.trim() : value
+      if (val) {
+        serverOptions[key] = val
+      }
+    }
+  })
+
+  const clientOptions: Record<string, any> = {}
+  Object.entries(advanced.client).forEach(([key, value]) => {
+    if (booleanClientKeys.has(key)) {
+      if (value) {
+        clientOptions[key] = true
+      }
+      return
+    }
+    if (numericClientKeys.has(key)) {
+      const num = Number(value)
+      if (!Number.isNaN(num) && value !== '') {
+        clientOptions[key] = num
+      }
+      return
+    }
+    if (stringClientKeys.has(key)) {
+      const val = typeof value === 'string' ? value.trim() : value
+      if (val) {
+        clientOptions[key] = val
+      }
+    }
+  })
+
+  const spec: Record<string, any> = {
+    transport,
+    bind_addr: `0.0.0.0:${effectiveControlPort}`,
+    remote_addr: remoteAddr,
+    listen_ip: listenIp,
+    control_port: effectiveControlPort,
+    public_port: effectivePublicPort,
+    listen_port: effectivePublicPort,
+    target_host: targetHost,
+    target_port: effectiveTargetPort,
+    target_addr: `${targetHost}:${effectiveTargetPort}`,
+    public_host: panelHost,
+    ports,
+  }
+
+  if (token) {
+    spec.token = token
+  }
+  if (base.accept_udp && (transport === 'tcp' || transport === 'tcpmux')) {
+    spec.accept_udp = true
+  }
+  if (Object.keys(serverOptions).length > 0) {
+    spec.server_options = serverOptions
+  }
+  if (Object.keys(clientOptions).length > 0) {
+    spec.client_options = clientOptions
+  }
+
+  return spec
+}
+
+function parseBackhaulSpec(spec: Record<string, any>, currentType: string): {
+  state: BackhaulFormState
+  advanced: BackhaulAdvancedState
+} {
+  const state = createDefaultBackhaulState()
+  const advanced = createDefaultBackhaulAdvancedState()
+
+  if (BACKHAUL_TRANSPORTS.includes(currentType as BackhaulTransport)) {
+    state.transport = currentType as BackhaulTransport
+  }
+
+  if (!spec) {
+    return { state, advanced }
+  }
+
+  const controlPortCandidate =
+    spec.control_port ??
+    extractPort(spec.bind_addr) ??
+    extractPort(spec.remote_addr)
+  if (controlPortCandidate) {
+    state.control_port = String(controlPortCandidate)
+  }
+
+  state.listen_ip = spec.listen_ip ?? state.listen_ip
+
+  const publicPortCandidate =
+    spec.public_port ??
+    spec.listen_port ??
+    derivePortFromPorts(spec.ports)
+  if (publicPortCandidate) {
+    state.public_port = String(publicPortCandidate)
+  }
+
+  if (spec.target_host) {
+    state.target_host = String(spec.target_host)
+  } else if (typeof spec.target_addr === 'string' && spec.target_addr.includes(':')) {
+    state.target_host = spec.target_addr.split(':')[0]
+  }
+
+  const targetPortCandidate =
+    spec.target_port ??
+    (typeof spec.target_addr === 'string' && spec.target_addr.includes(':')
+      ? spec.target_addr.split(':')[1]
+      : undefined)
+  if (targetPortCandidate) {
+    state.target_port = String(targetPortCandidate)
+  }
+
+  state.token = spec.token ?? ''
+  state.public_host = spec.public_host ?? ''
+  state.remote_addr = spec.remote_addr ?? ''
+  state.accept_udp = Boolean(spec.accept_udp)
+
+  if (Array.isArray(spec.ports) && spec.ports.length > 0) {
+    advanced.customPorts = spec.ports.join('\n')
+  }
+
+  const serverOptions = spec.server_options || {}
+  Object.entries(advanced.server).forEach(([key, defaultValue]) => {
+    const value = serverOptions[key]
+    if (value === undefined || value === null) {
+      return
+    }
+    if (typeof defaultValue === 'boolean') {
+      advanced.server[key as keyof BackhaulAdvancedServerState] = Boolean(value)
+    } else {
+      advanced.server[key as keyof BackhaulAdvancedServerState] = String(value)
+    }
+  })
+
+  const clientOptions = spec.client_options || {}
+  Object.entries(advanced.client).forEach(([key, defaultValue]) => {
+    const value = clientOptions[key]
+    if (value === undefined || value === null) {
+      return
+    }
+    if (typeof defaultValue === 'boolean') {
+      advanced.client[key as keyof BackhaulAdvancedClientState] = Boolean(value)
+    } else {
+      advanced.client[key as keyof BackhaulAdvancedClientState] = String(value)
+    }
+  })
+
+  return { state, advanced }
+}
+
+function extractPort(value: unknown): string | undefined {
+  if (typeof value === 'number') {
+    return value.toString()
+  }
+  if (typeof value === 'string') {
+    const parts = value.split(':')
+    const port = parts[parts.length - 1]
+    if (port && !Number.isNaN(Number(port))) {
+      return port
+    }
+  }
+  return undefined
+}
+
+function derivePortFromPorts(value: unknown): string | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined
+  }
+  const first = value[0]
+  if (typeof first !== 'string') {
+    return undefined
+  }
+  const [left] = first.split('=')
+  if (!left) {
+    return undefined
+  }
+  const segments = left.split(':')
+  const port = segments[segments.length - 1]
+  return port && !Number.isNaN(Number(port)) ? port : undefined
+}
+
+export default Tunnels

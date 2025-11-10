@@ -20,6 +20,7 @@ from app.routers import nodes, tunnels, panel, status, logs, auth
 from app.hysteria2_server import Hysteria2Server
 from app.gost_forwarder import gost_forwarder
 from app.rathole_server import rathole_server_manager
+from app.backhaul_manager import backhaul_manager
 import logging
 
 logging.basicConfig(
@@ -55,10 +56,12 @@ async def lifespan(app: FastAPI):
     app.state.gost_forwarder = gost_forwarder
     
     app.state.rathole_server_manager = rathole_server_manager
+    app.state.backhaul_manager = backhaul_manager
     
     await _restore_forwards()
     
     await _restore_rathole_servers()
+    await _restore_backhaul_servers()
     
     yield
     
@@ -68,6 +71,7 @@ async def lifespan(app: FastAPI):
     gost_forwarder.cleanup_all()
     
     rathole_server_manager.cleanup_all()
+    backhaul_manager.cleanup_all()
 
 
 async def _restore_forwards():
@@ -139,6 +143,29 @@ async def _restore_rathole_servers():
                 )
     except Exception as e:
         logger.error(f"Error restoring Rathole servers: {e}")
+
+
+async def _restore_backhaul_servers():
+    """Restore Backhaul servers for active tunnels on startup"""
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Tunnel).where(Tunnel.status == "active"))
+            tunnels = result.scalars().all()
+
+            for tunnel in tunnels:
+                if tunnel.core != "backhaul":
+                    continue
+
+                try:
+                    backhaul_manager.start_server(tunnel.id, tunnel.spec or {})
+                except Exception as exc:
+                    logger.error(
+                        "Failed to restore Backhaul server for tunnel %s: %s",
+                        tunnel.id,
+                        exc,
+                    )
+    except Exception as exc:
+        logger.error("Error restoring Backhaul servers: %s", exc)
 
 
 app = FastAPI(

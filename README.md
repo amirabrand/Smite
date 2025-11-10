@@ -7,7 +7,7 @@
     <img src="assets/SmiteL.png" alt="Smite Logo" width="200"/>
   </picture>
   
-  **Modern tunnel management built on GOST and Rathole, featuring an intuitive WebUI, fast CLI, and open-source freedom.**
+  **Modern tunnel management built on GOST, Backhaul, and Rathole, featuring an intuitive WebUI, fast CLI, and open-source freedom.**
   
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
@@ -23,11 +23,11 @@
 
 ## 🚀 Features
 
-- **Multiple Tunnel Types**: Support for TCP, UDP, gRPC, TCPMux, and Rathole
+- **Multiple Tunnel Types**: Support for TCP, UDP, gRPC, TCPMux, Backhaul, and Rathole
 - **Docker-First**: Easy deployment with Docker Compose
 - **Web UI**: Modern, intuitive web interface for tunnel management
 - **CLI Tools**: Powerful command-line tools for management
-- **Node Support**: Easy reverse tunnel setup with Rathole nodes
+- **Node Support**: Easy reverse tunnel setup with Backhaul and Rathole nodes
 - **GOST Forwarding**: Direct forwarding without nodes for better performance
 
 ---
@@ -63,6 +63,7 @@ cd Smite
 cp .env.example .env
 # Edit .env with your settings
 ```
+> **Tip**: To free ports `80/443` for tunnels, set `SMITE_HTTP_PORT` and `SMITE_HTTPS_PORT` in `.env`. Nginx will render its configuration from `nginx/default.conf.template` using these values.
 
 3. Install CLI tools:
 ```bash
@@ -85,7 +86,7 @@ smite admin create
 
 ## 🖥️ Node Installation
 
-> **Note**: Nodes are used for **Rathole** tunnels, providing easy reverse tunnel functionality. For GOST tunnels (TCP, UDP, gRPC, TCPMux), you can forward directly without a node.
+> **Note**: Nodes are used for **Backhaul** and **Rathole** tunnels, providing easy reverse tunnel functionality. For GOST tunnels (TCP, UDP, gRPC, TCPMux), you can forward directly without a node.
 
 ### Quick Install
 
@@ -158,6 +159,13 @@ smite-node logs         # View logs
 - **TCPMux**: TCP multiplexing for multiple connections
 
 These tunnels work directly without requiring a node - they forward traffic from the panel to the target server.
+
+### Backhaul Tunnels (Reverse Tunnel)
+- **TCP / UDP**: Low-latency reverse tunnels with optional UDP-over-TCP
+- **WS / WSMux**: WebSocket transports for CDN-friendly deployments
+- **Advanced Controls**: Configure multiplexing, keepalive, sniffer, and custom port maps per tunnel
+
+Backhaul tunnels require a node. The panel manages the Backhaul server automatically and the node applies the matching client configuration.
 
 ### Rathole Tunnels (Reverse Tunnel)
 Rathole tunnels require a node and provide easy reverse tunnel functionality. The node connects to the panel, allowing you to expose services running on the node's network through the panel.

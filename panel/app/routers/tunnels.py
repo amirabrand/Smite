@@ -6,7 +6,7 @@ from typing import List
 from datetime import datetime
 from pydantic import BaseModel
 import logging
-import sys
+import time
 
 from app.database import get_db
 from app.models import Tunnel, Node
@@ -60,8 +60,8 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
         node = result.scalar_one_or_none()
         if not node:
             raise HTTPException(status_code=404, detail="Node not found")
-    elif tunnel.core == "rathole":
-        raise HTTPException(status_code=400, detail="Node is required for Rathole tunnels")
+    elif tunnel.core in {"rathole", "backhaul"}:
+        raise HTTPException(status_code=400, detail=f"Node is required for {tunnel.core.title()} tunnels")
     
     db_tunnel = Tunnel(
         name=tunnel.name,
@@ -78,9 +78,44 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
     try:
         needs_gost_forwarding = db_tunnel.type in ["tcp", "udp", "ws", "grpc", "tcpmux"] and db_tunnel.core == "xray"
         needs_rathole_server = db_tunnel.core == "rathole"
-        needs_node_apply = db_tunnel.core == "rathole"
+        needs_backhaul_server = db_tunnel.core == "backhaul"
+        needs_node_apply = db_tunnel.core in {"rathole", "backhaul"}
         
-        logger.info(f"Tunnel {db_tunnel.id}: needs_gost_forwarding={needs_gost_forwarding}, needs_rathole_server={needs_rathole_server}")
+        logger.info(
+            "Tunnel %s: gost=%s, rathole=%s, backhaul=%s",
+            db_tunnel.id,
+            needs_gost_forwarding,
+            needs_rathole_server,
+            needs_backhaul_server,
+        )
+        
+        backhaul_started = False
+        rathole_started = False
+        
+        if needs_backhaul_server:
+            manager = getattr(request.app.state, "backhaul_manager", None)
+            if not manager:
+                db_tunnel.status = "error"
+                db_tunnel.error_message = "Backhaul manager not initialized on panel"
+                await db.commit()
+                await db.refresh(db_tunnel)
+                return db_tunnel
+            try:
+                logger.info("Starting Backhaul server for tunnel %s", db_tunnel.id)
+                manager.start_server(db_tunnel.id, db_tunnel.spec or {})
+                time.sleep(1.5)
+                if not manager.is_running(db_tunnel.id):
+                    raise RuntimeError("Backhaul process started but is not running")
+                backhaul_started = True
+                logger.info("Started Backhaul server for tunnel %s", db_tunnel.id)
+            except Exception as exc:
+                error_msg = f"Backhaul server error: {exc}"
+                logger.error("Failed to start Backhaul server for tunnel %s: %s", db_tunnel.id, exc, exc_info=True)
+                db_tunnel.status = "error"
+                db_tunnel.error_message = error_msg
+                await db.commit()
+                await db.refresh(db_tunnel)
+                return db_tunnel
         
         if needs_rathole_server:
             remote_addr = db_tunnel.spec.get("remote_addr")
@@ -109,6 +144,7 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                         proxy_port=int(proxy_port)
                     )
                     logger.info(f"Successfully started Rathole server for tunnel {db_tunnel.id}")
+                    rathole_started = True
                 except Exception as e:
                     error_msg = str(e)
                     logger.error(f"Failed to start Rathole server for tunnel {db_tunnel.id}: {error_msg}", exc_info=True)
@@ -163,6 +199,11 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                         request.app.state.rathole_server_manager.stop_server(db_tunnel.id)
                     except:
                         pass
+                if needs_backhaul_server and hasattr(request.app.state, "backhaul_manager"):
+                    try:
+                        request.app.state.backhaul_manager.stop_server(db_tunnel.id)
+                    except Exception:
+                        pass
                 await db.commit()
                 await db.refresh(db_tunnel)
                 return db_tunnel
@@ -175,6 +216,11 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     try:
                         request.app.state.rathole_server_manager.stop_server(db_tunnel.id)
                     except:
+                        pass
+                if needs_backhaul_server and hasattr(request.app.state, "backhaul_manager"):
+                    try:
+                        request.app.state.backhaul_manager.stop_server(db_tunnel.id)
+                    except Exception:
                         pass
                 await db.commit()
                 await db.refresh(db_tunnel)
@@ -204,7 +250,6 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                             forward_to=forward_to,
                             tunnel_type=db_tunnel.type
                         )
-                        import time
                         time.sleep(2)
                         if not request.app.state.gost_forwarder.is_forwarding(db_tunnel.id):
                             raise RuntimeError("Gost process started but is not running")
@@ -241,6 +286,16 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
         error_msg = str(e)
         db_tunnel.status = "error"
         db_tunnel.error_message = f"Tunnel creation error: {error_msg}"
+        try:
+            if needs_rathole_server and hasattr(request.app.state, "rathole_server_manager"):
+                request.app.state.rathole_server_manager.stop_server(db_tunnel.id)
+        except Exception:
+            pass
+        try:
+            if needs_backhaul_server and hasattr(request.app.state, "backhaul_manager"):
+                request.app.state.backhaul_manager.stop_server(db_tunnel.id)
+        except Exception:
+            pass
         await db.commit()
         await db.refresh(db_tunnel)
     
@@ -297,7 +352,8 @@ async def update_tunnel(
         try:
             needs_gost_forwarding = tunnel.type in ["tcp", "udp", "ws", "grpc", "tcpmux"] and tunnel.core == "xray"
             needs_rathole_server = tunnel.core == "rathole"
-            needs_node_apply = tunnel.core == "rathole"
+            needs_backhaul_server = tunnel.core == "backhaul"
+            needs_node_apply = tunnel.core in {"rathole", "backhaul"}
             
             if needs_gost_forwarding:
                 listen_port = tunnel.spec.get("listen_port")
@@ -313,7 +369,6 @@ async def update_tunnel(
                 if panel_port and forward_to and hasattr(request.app.state, 'gost_forwarder'):
                     try:
                         request.app.state.gost_forwarder.stop_forward(tunnel.id)
-                        import time
                         time.sleep(0.5)
                         logger.info(f"Restarting gost forwarding for tunnel {tunnel.id}: {tunnel.type}://:{panel_port} -> {forward_to}")
                         request.app.state.gost_forwarder.start_forward(
@@ -356,6 +411,24 @@ async def update_tunnel(
                             logger.error(f"Failed to restart Rathole server: {e}")
                             tunnel.status = "error"
                             tunnel.error_message = f"Rathole server error: {str(e)}"
+            elif needs_backhaul_server:
+                manager = getattr(request.app.state, "backhaul_manager", None)
+                if manager:
+                    try:
+                        manager.stop_server(tunnel.id)
+                    except Exception:
+                        pass
+                    try:
+                        manager.start_server(tunnel.id, tunnel.spec or {})
+                        time.sleep(1.0)
+                        if not manager.is_running(tunnel.id):
+                            raise RuntimeError("Backhaul process not running")
+                        tunnel.status = "active"
+                        tunnel.error_message = None
+                    except Exception as exc:
+                        logger.error("Failed to restart Backhaul server for tunnel %s: %s", tunnel.id, exc, exc_info=True)
+                        tunnel.status = "error"
+                        tunnel.error_message = f"Backhaul server error: {exc}"
             
             if needs_node_apply and tunnel.node_id:
                 result = await db.execute(select(Node).where(Node.id == tunnel.node_id))
@@ -380,10 +453,20 @@ async def update_tunnel(
                         else:
                             tunnel.status = "error"
                             tunnel.error_message = f"Node error: {response.get('message', 'Unknown error')}"
+                            if needs_backhaul_server and hasattr(request.app.state, "backhaul_manager"):
+                                try:
+                                    request.app.state.backhaul_manager.stop_server(tunnel.id)
+                                except Exception:
+                                    pass
                     except Exception as e:
                         logger.error(f"Failed to re-apply tunnel to node: {e}")
                         tunnel.status = "error"
                         tunnel.error_message = f"Node error: {str(e)}"
+                        if needs_backhaul_server and hasattr(request.app.state, "backhaul_manager"):
+                            try:
+                                request.app.state.backhaul_manager.stop_server(tunnel.id)
+                            except Exception:
+                                pass
             
             await db.commit()
             await db.refresh(tunnel)
@@ -454,6 +537,7 @@ async def delete_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Dep
     
     needs_gost_forwarding = tunnel.type in ["tcp", "udp", "ws", "grpc"] and tunnel.core == "xray"
     needs_rathole_server = tunnel.core == "rathole"
+    needs_backhaul_server = tunnel.core == "backhaul"
     
     if needs_gost_forwarding:
         if hasattr(request.app.state, 'gost_forwarder'):
@@ -470,6 +554,13 @@ async def delete_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Dep
             except Exception as e:
                 import logging
                 logging.error(f"Failed to stop Rathole server: {e}")
+    elif needs_backhaul_server:
+        if hasattr(request.app.state, "backhaul_manager"):
+            try:
+                request.app.state.backhaul_manager.stop_server(tunnel.id)
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to stop Backhaul server: {e}")
     
     if tunnel.status == "active":
         result = await db.execute(select(Node).where(Node.id == tunnel.node_id))
@@ -489,111 +580,4 @@ async def delete_tunnel(tunnel_id: str, request: Request, db: AsyncSession = Dep
     await db.commit()
     return {"status": "deleted"}
 
-
-@router.put("/{tunnel_id}", response_model=TunnelResponse)
-async def update_tunnel(tunnel_id: str, tunnel: TunnelUpdate, request: Request, db: AsyncSession = Depends(get_db)):
-    """Update a tunnel"""
-    from app.hysteria2_client import Hysteria2Client
-    
-    result = await db.execute(select(Tunnel).where(Tunnel.id == tunnel_id))
-    db_tunnel = result.scalar_one_or_none()
-    if not db_tunnel:
-        raise HTTPException(status_code=404, detail="Tunnel not found")
-    
-    if tunnel.name is not None:
-        db_tunnel.name = tunnel.name
-    if tunnel.spec is not None:
-        db_tunnel.spec = tunnel.spec
-    
-    db_tunnel.revision += 1
-    db_tunnel.updated_at = datetime.utcnow()
-    
-    if tunnel.spec is not None:
-        result = await db.execute(select(Node).where(Node.id == db_tunnel.node_id))
-        node = result.scalar_one_or_none()
-        if node:
-            client = Hysteria2Client()
-            try:
-                old_needs_gost_forwarding = db_tunnel.type in ["tcp", "udp", "ws", "grpc"] and db_tunnel.core == "xray"
-                old_needs_rathole_server = db_tunnel.core == "rathole"
-                
-                if old_needs_gost_forwarding:
-                    if hasattr(request.app.state, 'gost_forwarder'):
-                        try:
-                            request.app.state.gost_forwarder.stop_forward(db_tunnel.id)
-                        except:
-                            pass
-                elif old_needs_rathole_server:
-                    if hasattr(request.app.state, 'rathole_server_manager'):
-                        try:
-                            request.app.state.rathole_server_manager.stop_server(db_tunnel.id)
-                        except:
-                            pass
-                
-                response = await client.send_to_node(
-                    node_id=node.id,
-                    endpoint="/api/agent/tunnels/apply",
-                    data={
-                        "tunnel_id": db_tunnel.id,
-                        "core": db_tunnel.core,
-                        "type": db_tunnel.type,
-                        "spec": db_tunnel.spec
-                    }
-                )
-                
-                if response.get("status") == "success":
-                    db_tunnel.status = "active"
-                    needs_gost_forwarding = db_tunnel.type in ["tcp", "udp", "ws", "grpc"] and db_tunnel.core == "xray"
-                    needs_rathole_server = db_tunnel.core == "rathole"
-                    
-                    if needs_gost_forwarding:
-                        forward_to = db_tunnel.spec.get("forward_to")
-                        if not forward_to:
-                            remote_ip = db_tunnel.spec.get("remote_ip", "127.0.0.1")
-                            remote_port = db_tunnel.spec.get("remote_port", 8080)
-                            forward_to = f"{remote_ip}:{remote_port}"
-                        
-                        panel_port = db_tunnel.spec.get("listen_port") or db_tunnel.spec.get("remote_port")
-                        
-                        if panel_port and forward_to and hasattr(request.app.state, 'gost_forwarder'):
-                            try:
-                                request.app.state.gost_forwarder.start_forward(
-                                    tunnel_id=db_tunnel.id,
-                                    local_port=int(panel_port),
-                                    forward_to=forward_to,
-                                    tunnel_type=db_tunnel.type
-                                )
-                            except Exception as e:
-                                import logging
-                                logging.error(f"Failed to start gost forwarding: {e}")
-                    
-                    elif needs_rathole_server:
-                        remote_addr = db_tunnel.spec.get("remote_addr")
-                        token = db_tunnel.spec.get("token")
-                        proxy_port = db_tunnel.spec.get("remote_port") or db_tunnel.spec.get("listen_port")
-                        
-                        if remote_addr and token and proxy_port and hasattr(request.app.state, 'rathole_server_manager'):
-                            try:
-                                success = request.app.state.rathole_server_manager.start_server(
-                                    tunnel_id=db_tunnel.id,
-                                    remote_addr=remote_addr,
-                                    token=token,
-                                    proxy_port=int(proxy_port)
-                                )
-                                if not success:
-                                    db_tunnel.status = "error"
-                            except Exception as e:
-                                import logging
-                                logging.error(f"Failed to start Rathole server: {e}")
-                                db_tunnel.status = "error"
-                else:
-                    db_tunnel.status = "error"
-            except Exception as e:
-                db_tunnel.status = "error"
-                import logging
-                logging.error(f"Failed to reapply tunnel: {e}")
-    
-    await db.commit()
-    await db.refresh(db_tunnel)
-    return db_tunnel
 

@@ -31,11 +31,11 @@ async def apply_tunnel(data: TunnelApply, request: Request):
     logger = logging.getLogger(__name__)
     adapter_manager = request.app.state.adapter_manager
     
-    logger.info(f"Applying tunnel {data.tunnel_id}: type={data.type}")
+    logger.info(f"Applying tunnel {data.tunnel_id}: core={data.core}, type={data.type}")
     try:
         await adapter_manager.apply_tunnel(
             tunnel_id=data.tunnel_id,
-            tunnel_type=data.type,
+            tunnel_core=data.core,
             spec=data.spec
         )
         logger.info(f"Tunnel {data.tunnel_id} applied successfully")

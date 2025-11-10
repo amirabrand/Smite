@@ -1,12 +1,11 @@
 """Core adapters for different tunnel types"""
-from typing import Protocol, Dict, Any, Optional
-from abc import ABC, abstractmethod
+from typing import Protocol, Dict, Any, Optional, List
 import subprocess
-import json
 import os
 import psutil
 import time
 from pathlib import Path
+import shutil
 
 
 class CoreAdapter(Protocol):
@@ -154,29 +153,242 @@ local_addr = "{local_addr}"
         return 0.0
 
 
+class BackhaulAdapter:
+    """Backhaul reverse tunnel adapter"""
+    name = "backhaul"
+
+    CLIENT_OPTION_KEYS = [
+        "connection_pool",
+        "retry_interval",
+        "nodelay",
+        "keepalive_period",
+        "log_level",
+        "pprof",
+        "mux_session",
+        "mux_version",
+        "mux_framesize",
+        "mux_recievebuffer",
+        "mux_streambuffer",
+        "sniffer",
+        "web_port",
+        "sniffer_log",
+        "dial_timeout",
+        "aggressive_pool",
+        "edge_ip",
+        "skip_optz",
+        "mss",
+        "so_rcvbuf",
+        "so_sndbuf",
+        "accept_udp",
+    ]
+
+    def __init__(
+        self,
+        config_dir: Optional[Path] = None,
+        binary_path: Optional[Path] = None,
+    ):
+        resolved_config = config_dir or Path(
+            os.environ.get("SMITE_BACKHAUL_CLIENT_DIR", "/etc/smite-node/backhaul")
+        )
+        self.config_dir = Path(resolved_config)
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.processes: Dict[str, subprocess.Popen] = {}
+        self.usage_tracking: Dict[str, float] = {}
+        self.log_handles: Dict[str, Any] = {}
+        default_binary = binary_path or Path(
+            os.environ.get("BACKHAUL_CLIENT_BINARY", "/usr/local/bin/backhaul")
+        )
+        self.binary_candidates = [
+            Path(default_binary),
+            Path("backhaul"),
+        ]
+
+    def apply(self, tunnel_id: str, spec: Dict[str, Any]):
+        remote_addr = spec.get("remote_addr") or spec.get("control_addr") or spec.get("bind_addr")
+        if not remote_addr:
+            raise ValueError("Backhaul requires 'remote_addr' in spec")
+
+        transport = (spec.get("transport") or spec.get("type") or "tcp").lower()
+        if transport not in {"tcp", "udp", "ws", "wsmux", "tcpmux"}:
+            raise ValueError(f"Unsupported Backhaul transport '{transport}'")
+        client_options = dict(spec.get("client_options") or {})
+
+        config_dict: Dict[str, Any] = {
+            "remote_addr": remote_addr,
+            "transport": transport,
+        }
+
+        token = spec.get("token") or client_options.get("token")
+        if token:
+            config_dict["token"] = token
+
+        for key in self.CLIENT_OPTION_KEYS:
+            value = client_options.get(key)
+            if value is None or value == "":
+                value = spec.get(key)
+            if value is None or value == "":
+                continue
+            config_dict[key] = value
+
+        if "connection_pool" not in config_dict:
+            config_dict["connection_pool"] = 4
+        if "retry_interval" not in config_dict:
+            config_dict["retry_interval"] = 3
+        if "dial_timeout" not in config_dict:
+            config_dict["dial_timeout"] = 10
+
+        if spec.get("accept_udp") and transport in {"tcp", "tcpmux"}:
+            config_dict["accept_udp"] = True
+
+        config_path = self.config_dir / f"{tunnel_id}.toml"
+        config_path.write_text(self._render_toml({"client": config_dict}), encoding="utf-8")
+
+        binary_path = self._resolve_binary_path()
+
+        log_path = self.config_dir / f"backhaul_{tunnel_id}.log"
+        log_fh = log_path.open("w", buffering=1)
+        log_fh.write(f"Starting Backhaul client for tunnel {tunnel_id}\n")
+        log_fh.write(self._render_toml({"client": config_dict}))
+        log_fh.flush()
+
+        try:
+            proc = subprocess.Popen(
+                [str(binary_path), "-c", str(config_path)],
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+            )
+        except Exception:
+            log_fh.close()
+            raise
+
+        time.sleep(0.5)
+        if proc.poll() is not None:
+            error_output = ""
+            try:
+                error_output = log_path.read_text(encoding="utf-8")[-1000:]
+            except Exception:
+                pass
+            log_fh.close()
+            raise RuntimeError(f"backhaul failed to start: {error_output}")
+
+        self.processes[tunnel_id] = proc
+        self.log_handles[tunnel_id] = log_fh
+        self.usage_tracking.setdefault(tunnel_id, 0.0)
+
+    def remove(self, tunnel_id: str):
+        config_path = self.config_dir / f"{tunnel_id}.toml"
+        if tunnel_id in self.processes:
+            proc = self.processes[tunnel_id]
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            except Exception:
+                pass
+            del self.processes[tunnel_id]
+        if tunnel_id in self.log_handles:
+            try:
+                self.log_handles[tunnel_id].close()
+            except Exception:
+                pass
+            del self.log_handles[tunnel_id]
+
+        if config_path.exists():
+            try:
+                config_path.unlink()
+            except Exception:
+                pass
+
+    def status(self, tunnel_id: str) -> Dict[str, Any]:
+        config_path = self.config_dir / f"{tunnel_id}.toml"
+        proc = self.processes.get(tunnel_id)
+        is_running = proc is not None and proc.poll() is None
+        return {
+            "active": config_path.exists() and is_running,
+            "type": "backhaul",
+            "config_exists": config_path.exists(),
+            "process_running": is_running,
+        }
+
+    def get_usage_mb(self, tunnel_id: str) -> float:
+        if tunnel_id in self.processes:
+            proc = self.processes[tunnel_id]
+            try:
+                proc_info = psutil.Process(proc.pid)
+                io_counters = proc_info.io_counters()
+                total_bytes = io_counters.read_bytes + io_counters.write_bytes
+                current_mb = total_bytes / (1024 * 1024)
+                previous = self.usage_tracking.get(tunnel_id, 0.0)
+                if current_mb > previous:
+                    self.usage_tracking[tunnel_id] = current_mb
+                return self.usage_tracking.get(tunnel_id, current_mb)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError, OSError):
+                return self.usage_tracking.get(tunnel_id, 0.0)
+        return self.usage_tracking.get(tunnel_id, 0.0)
+
+    def _render_toml(self, data: Dict[str, Dict[str, Any]]) -> str:
+        def format_value(value: Any) -> str:
+            if isinstance(value, bool):
+                return "true" if value else "false"
+            if isinstance(value, (int, float)):
+                return str(value)
+            if isinstance(value, list):
+                if not value:
+                    return "[]"
+                rendered = ",\n  ".join(f"\"{str(item)}\"" for item in value)
+                return "[\n  " + rendered + "\n]"
+            value_str = str(value).replace("\\", "\\\\").replace('"', '\\"')
+            return f"\"{value_str}\""
+
+        lines: List[str] = []
+        for section, values in data.items():
+            lines.append(f"[{section}]")
+            for key, val in values.items():
+                if val is None:
+                    continue
+                lines.append(f"{key} = {format_value(val)}")
+            lines.append("")
+        return "\n".join(lines).strip() + "\n"
+
+    def _resolve_binary_path(self) -> Path:
+        for candidate in self.binary_candidates:
+            if candidate.exists():
+                return candidate
+
+        resolved = shutil.which("backhaul")
+        if resolved:
+            return Path(resolved)
+
+        raise FileNotFoundError(
+            "Backhaul binary not found. Expected at BACKHAUL_CLIENT_BINARY, '/usr/local/bin/backhaul', or in PATH."
+        )
+
+
 class AdapterManager:
     """Manager for core adapters"""
     
     def __init__(self):
         self.adapters: Dict[str, CoreAdapter] = {
             "rathole": RatholeAdapter(),
+            "backhaul": BackhaulAdapter(),
         }
         self.active_tunnels: Dict[str, CoreAdapter] = {}
         self.usage_tracking: Dict[str, float] = {}
     
-    def get_adapter(self, tunnel_type: str) -> Optional[CoreAdapter]:
-        """Get adapter for tunnel type"""
-        return self.adapters.get(tunnel_type)
+    def get_adapter(self, tunnel_core: str) -> Optional[CoreAdapter]:
+        """Get adapter for tunnel core"""
+        return self.adapters.get(tunnel_core)
     
-    async def apply_tunnel(self, tunnel_id: str, tunnel_type: str, spec: Dict[str, Any]):
+    async def apply_tunnel(self, tunnel_id: str, tunnel_core: str, spec: Dict[str, Any]):
         """Apply tunnel using appropriate adapter"""
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"Applying tunnel {tunnel_id}: type={tunnel_type}")
+        logger.info(f"Applying tunnel {tunnel_id}: core={tunnel_core}")
         
-        adapter = self.get_adapter(tunnel_type)
+        adapter = self.get_adapter(tunnel_core)
         if not adapter:
-            error_msg = f"Unknown tunnel type: {tunnel_type}"
+            error_msg = f"Unknown tunnel core: {tunnel_core}"
             logger.error(error_msg)
             raise ValueError(error_msg)
         
