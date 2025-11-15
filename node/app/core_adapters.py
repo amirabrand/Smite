@@ -328,6 +328,10 @@ class BackhaulAdapter:
         if remote_addr:
             # Parse remote_addr to extract host and port
             host, port, is_ipv6 = parse_address_port(remote_addr)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Backhaul tunnel {tunnel_id}: parsed remote_addr '{remote_addr}' -> host={host}, port={port}, is_ipv6={is_ipv6}")
+            
             if host and port:
                 self.tunnel_ports[tunnel_id] = (host, port, is_ipv6, True)  # True = track by remote address
                 # Add iptables tracking rule for outbound connections to remote address
@@ -345,11 +349,11 @@ class BackhaulAdapter:
                     baseline_bytes = get_traffic_bytes_for_remote(tunnel_id, host, port, is_ipv6)
                     
                     self.iptables_baseline[tunnel_id] = baseline_bytes
-                    import logging
-                    logging.getLogger(__name__).info(f"Added iptables tracking for Backhaul tunnel {tunnel_id} to {host}:{port} (IPv6={is_ipv6}), baseline: {baseline_bytes} bytes")
+                    logger.info(f"Added iptables tracking for Backhaul tunnel {tunnel_id} to {host}:{port} (IPv6={is_ipv6}), baseline: {baseline_bytes} bytes")
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Failed to add iptables tracking for Backhaul tunnel {tunnel_id}: {e}", exc_info=True)
+                    logger.error(f"Failed to add iptables tracking for Backhaul tunnel {tunnel_id}: {e}", exc_info=True)
+            else:
+                logger.warning(f"Backhaul tunnel {tunnel_id}: Could not parse remote_addr '{remote_addr}' - host={host}, port={port}. Traffic tracking will not work.")
 
     def remove(self, tunnel_id: str):
         config_path = self.config_dir / f"{tunnel_id}.toml"
@@ -420,13 +424,14 @@ class BackhaulAdapter:
                     baseline = self.iptables_baseline.get(tunnel_id, 0)
                     # Calculate actual usage as difference from baseline
                     iptables_bytes = max(0, current_iptables_bytes - baseline)
+                    logger.debug(f"Backhaul tunnel {tunnel_id} ({host}:{port}): iptables current={current_iptables_bytes} bytes, baseline={baseline} bytes, usage={iptables_bytes} bytes ({iptables_bytes/(1024*1024):.2f} MB)")
                     if iptables_bytes > 0:
-                        logger.info(f"Backhaul tunnel {tunnel_id} ({host}:{port}): iptables current={current_iptables_bytes} bytes, baseline={baseline} bytes, usage={iptables_bytes} bytes ({iptables_bytes/(1024*1024):.2f} MB)")
+                        logger.info(f"Backhaul tunnel {tunnel_id} ({host}:{port}): usage={iptables_bytes} bytes ({iptables_bytes/(1024*1024):.2f} MB)")
                     total_bytes = iptables_bytes
                 except Exception as e:
                     logger.warning(f"Failed to get iptables bytes for Backhaul tunnel {tunnel_id}: {e}", exc_info=True)
         else:
-            logger.warning(f"Backhaul tunnel {tunnel_id} not found in tunnel_ports - no tracking configured")
+            logger.debug(f"Backhaul tunnel {tunnel_id} not found in tunnel_ports - no tracking configured")
         
         # Convert to MB and return directly (panel handles cumulative tracking)
         return total_bytes / (1024 * 1024)
