@@ -329,12 +329,20 @@ const Tunnels = () => {
                 </>
               )}
               {tunnel.core === 'chisel' && (
-                <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Local Port</span>
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">
-                    {tunnel.spec?.local_addr ? tunnel.spec.local_addr.split(':')[1] : 'N/A'}
-                  </span>
-                </div>
+                <>
+                  <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Control Port</span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {tunnel.spec?.control_port || (tunnel.spec?.listen_port ? (parseInt(tunnel.spec.listen_port.toString()) + 10000).toString() : 'N/A')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Local Port</span>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {tunnel.spec?.local_addr ? tunnel.spec.local_addr.split(':')[1] : 'N/A'}
+                    </span>
+                  </div>
+                </>
               )}
               {tunnel.core === 'xray' && (tunnel.spec?.forward_to || (tunnel.spec?.remote_ip && tunnel.spec?.remote_port)) && (
                 <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700">
@@ -425,6 +433,7 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
       const parsed = parseAddressPort(tunnel.spec.local_addr)
       return parsed.port?.toString() || ''
     })() : '',
+    chisel_control_port: tunnel.spec?.control_port ? tunnel.spec.control_port.toString() : '',
   })
   const parsedBackhaul = parseBackhaulSpec(tunnel.spec, tunnel.type)
   const [backhaulState, setBackhaulState] = useState<BackhaulFormState>(parsedBackhaul.state)
@@ -460,6 +469,20 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
         updatedSpec.listen_port = port
         // Also set forward_to for backward compatibility
         updatedSpec.forward_to = formatAddressPort(remoteIp, port)
+      } else if (tunnel.core === 'chisel') {
+        const listenPort = parseInt(formData.port.toString()) || 8080
+        updatedSpec.listen_port = listenPort
+        updatedSpec.remote_port = listenPort
+        // Control port: if specified, use it; otherwise auto (listen_port + 10000)
+        const controlPort = formData.chisel_control_port 
+          ? parseInt(formData.chisel_control_port.toString())
+          : listenPort + 10000
+        updatedSpec.control_port = controlPort
+        // Local port
+        if (formData.rathole_local_port) {
+          const localHost = updatedSpec.use_ipv6 ? '::1' : '127.0.0.1'
+          updatedSpec.local_addr = `${localHost}:${formData.rathole_local_port}`
+        }
       } else if (tunnel.core === 'backhaul') {
         updatedSpec = buildBackhaulSpec(backhaulState, backhaulAdvanced, tunnel.type as BackhaulTransport)
       }
@@ -607,6 +630,69 @@ const EditTunnelModal = ({ tunnel, onClose, onSuccess }: EditTunnelModalProps) =
             </>
           )}
           
+          {tunnel.core === 'chisel' && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Reverse Port
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.port}
+                    onChange={(e) =>
+                      setFormData({ ...formData, port: parseInt(e.target.value) || 8080 })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                    min="1"
+                    max="65535"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Port where clients connect to access tunneled service
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Control Port
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.chisel_control_port}
+                    onChange={(e) =>
+                      setFormData({ ...formData, chisel_control_port: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                    placeholder={`${(parseInt(formData.port.toString()) || 8080) + 10000} (auto)`}
+                    min="1"
+                    max="65535"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Chisel server control port (leave empty for auto: reverse port + 10000)
+                  </p>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Local Port
+                </label>
+                <input
+                  type="number"
+                  value={formData.rathole_local_port}
+                  onChange={(e) =>
+                    setFormData({ ...formData, rathole_local_port: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                  placeholder="8080"
+                  min="1"
+                  max="65535"
+                  required
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Port on node where local service listens</p>
+              </div>
+            </>
+          )}
+          
           <div className="flex gap-3 justify-end">
             <button
               type="button"
@@ -651,6 +737,7 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
     rathole_remote_addr: '23333',
     rathole_token: '',
     rathole_local_port: '8080',
+    chisel_control_port: '',  // Empty means auto (listen_port + 10000)
     use_ipv6: false,
     spec: {} as Record<string, any>,
   })
@@ -701,6 +788,11 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
         spec.listen_port = listenPort
         spec.remote_port = listenPort
         spec.server_port = listenPort  // Keep for backward compatibility
+        // Control port: if specified, use it; otherwise auto (listen_port + 10000)
+        const controlPort = formData.chisel_control_port 
+          ? parseInt(formData.chisel_control_port.toString())
+          : listenPort + 10000
+        spec.control_port = controlPort
         // Local port on node where the service listens (default to same as listen_port if not specified)
         const localPort = parseInt(formData.rathole_local_port?.toString() || formData.port?.toString() || '8080')
         const localHost = formData.use_ipv6 ? '::1' : '127.0.0.1'
@@ -1011,45 +1103,68 @@ const AddTunnelModal = ({ nodes, onClose, onSuccess }: AddTunnelModalProps) => {
           )}
           
           {formData.core === 'chisel' && (
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Server Port
-                </label>
-                <input
-                  type="number"
-                  value={formData.port}
-                  onChange={(e) =>
-                    setFormData({ ...formData, port: parseInt(e.target.value) || 8080 })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-                  min="1"
-                  max="65535"
-                  required
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Port on panel for Chisel server to listen
-                </p>
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Reverse Port
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.port}
+                    onChange={(e) =>
+                      setFormData({ ...formData, port: parseInt(e.target.value) || 8080 })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                    min="1"
+                    max="65535"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Port where clients connect to access tunneled service
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Control Port
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.chisel_control_port}
+                    onChange={(e) =>
+                      setFormData({ ...formData, chisel_control_port: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                    placeholder={`${(parseInt(formData.port.toString()) || 8080) + 10000} (auto)`}
+                    min="1"
+                    max="65535"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Chisel server control port (leave empty for auto: reverse port + 10000)
+                  </p>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Local Port
-                </label>
-                <input
-                  type="number"
-                  value={formData.rathole_local_port}
-                  onChange={(e) =>
-                    setFormData({ ...formData, rathole_local_port: e.target.value })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-                  placeholder="8080"
-                  min="1"
-                  max="65535"
-                  required
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Port on node where local service listens</p>
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Local Port
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.rathole_local_port}
+                    onChange={(e) =>
+                      setFormData({ ...formData, rathole_local_port: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                    placeholder="8080"
+                    min="1"
+                    max="65535"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Port on node where local service listens</p>
+                </div>
               </div>
-            </div>
+            </>
           )}
           
           <div className="flex items-center gap-2">

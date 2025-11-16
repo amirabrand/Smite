@@ -201,8 +201,12 @@ async def _restore_chisel_servers():
                 
                 try:
                     use_ipv6 = tunnel.spec.get("use_ipv6", False)
-                    # Use listen_port + 10000 for server control port to avoid conflict with reverse tunnel endpoint
-                    server_control_port = int(listen_port) + 10000
+                    # Use control_port from spec if provided, otherwise default to listen_port + 10000
+                    server_control_port = tunnel.spec.get("control_port")
+                    if server_control_port:
+                        server_control_port = int(server_control_port)
+                    else:
+                        server_control_port = int(listen_port) + 10000
                     chisel_server_manager.start_server(
                         tunnel_id=tunnel.id,
                         server_port=server_control_port,
@@ -255,8 +259,12 @@ async def _restore_node_tunnels():
                         listen_port = spec_for_node.get("listen_port") or spec_for_node.get("remote_port") or spec_for_node.get("server_port")
                         use_ipv6 = spec_for_node.get("use_ipv6", False)
                         if listen_port:
-                            # Use listen_port + 10000 for server control port to avoid conflict
-                            server_control_port = int(listen_port) + 10000
+                            # Use control_port from spec if provided, otherwise default to listen_port + 10000
+                            server_control_port = spec_for_node.get("control_port")
+                            if server_control_port:
+                                server_control_port = int(server_control_port)
+                            else:
+                                server_control_port = int(listen_port) + 10000
                             reverse_port = int(listen_port)  # This is where clients connect
                             
                             # Get panel host - prioritize spec.panel_host (set by frontend)

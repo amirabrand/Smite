@@ -200,8 +200,12 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             
             if listen_port and hasattr(request.app.state, 'chisel_server_manager'):
                 try:
-                    # Use listen_port + 10000 for server control port to avoid conflict with reverse tunnel endpoint
-                    server_control_port = int(listen_port) + 10000
+                    # Use control_port from spec if provided, otherwise default to listen_port + 10000
+                    server_control_port = db_tunnel.spec.get("control_port")
+                    if server_control_port:
+                        server_control_port = int(server_control_port)
+                    else:
+                        server_control_port = int(listen_port) + 10000
                     logger.info(f"Starting Chisel server for tunnel {db_tunnel.id}: server_control_port={server_control_port}, reverse_port={listen_port}, auth={auth is not None}, fingerprint={fingerprint is not None}, use_ipv6={use_ipv6}")
                     request.app.state.chisel_server_manager.start_server(
                         tunnel_id=db_tunnel.id,
@@ -254,9 +258,12 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     # IMPORTANT: Chisel reverse tunnel endpoint port must be DIFFERENT from server control port
                     # The server_port (listen_port) is where the Chisel server listens for client connections  
                     # The reverse_port is where clients connect to access the tunneled service
-                    # We use a fixed offset: server control port = listen_port + 10000, reverse_port = listen_port
-                    # This way clients connect to listen_port, and server control is on listen_port + 10000
-                    server_control_port = int(listen_port) + 10000
+                    # Use control_port from spec if provided, otherwise default to listen_port + 10000
+                    server_control_port = spec_for_node.get("control_port")
+                    if server_control_port:
+                        server_control_port = int(server_control_port)
+                    else:
+                        server_control_port = int(listen_port) + 10000
                     reverse_port = int(listen_port)  # This is where clients connect
                     
                     # Get panel host - prioritize spec.panel_host (set by frontend), then node's view
