@@ -200,10 +200,12 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
             
             if listen_port and hasattr(request.app.state, 'chisel_server_manager'):
                 try:
-                    logger.info(f"Starting Chisel server for tunnel {db_tunnel.id}: listen_port={listen_port}, auth={auth is not None}, fingerprint={fingerprint is not None}, use_ipv6={use_ipv6}")
+                    # Use listen_port + 10000 for server control port to avoid conflict with reverse tunnel endpoint
+                    server_control_port = int(listen_port) + 10000
+                    logger.info(f"Starting Chisel server for tunnel {db_tunnel.id}: server_control_port={server_control_port}, reverse_port={listen_port}, auth={auth is not None}, fingerprint={fingerprint is not None}, use_ipv6={use_ipv6}")
                     request.app.state.chisel_server_manager.start_server(
                         tunnel_id=db_tunnel.id,
-                        server_port=int(listen_port),
+                        server_port=server_control_port,
                         auth=auth,
                         fingerprint=fingerprint,
                         use_ipv6=bool(use_ipv6)
@@ -249,6 +251,14 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 listen_port = spec_for_node.get("listen_port") or spec_for_node.get("remote_port") or spec_for_node.get("server_port")
                 use_ipv6 = spec_for_node.get("use_ipv6", False)
                 if listen_port:
+                    # IMPORTANT: Chisel reverse tunnel endpoint port must be DIFFERENT from server control port
+                    # The server_port (listen_port) is where the Chisel server listens for client connections  
+                    # The reverse_port is where clients connect to access the tunneled service
+                    # We use a fixed offset: server control port = listen_port + 10000, reverse_port = listen_port
+                    # This way clients connect to listen_port, and server control is on listen_port + 10000
+                    server_control_port = int(listen_port) + 10000
+                    reverse_port = int(listen_port)  # This is where clients connect
+                    
                     # Get panel host - prioritize spec.panel_host (set by frontend), then node's view
                     panel_host = spec_for_node.get("panel_host")
                     
@@ -286,17 +296,20 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                         # Use IPv6 format with brackets
                         formatted_host = format_address_port(panel_host, None)
                         if "[" in formatted_host:
-                            server_url = f"http://{formatted_host}:{listen_port}"
+                            server_url = f"http://{formatted_host}:{server_control_port}"
                         else:
                             # If host is not IPv6, use IPv6 localhost
-                            server_url = f"http://[::1]:{listen_port}"
+                            server_url = f"http://[::1]:{server_control_port}"
                     else:
-                        # Construct server_url: http://panel_host:listen_port
-                        server_url = f"http://{panel_host}:{listen_port}"
+                        # Construct server_url: http://panel_host:server_control_port
+                        # This is the Chisel server control port (where Chisel client connects)
+                        # We use listen_port + 10000 to avoid conflict with reverse tunnel endpoint
+                        server_url = f"http://{panel_host}:{server_control_port}"
                     spec_for_node["server_url"] = server_url
-                    # Set remote_port to listen_port for reverse tunnel (clients connect to this port)
-                    spec_for_node["remote_port"] = int(listen_port)
-                    logger.info(f"Chisel tunnel {db_tunnel.id}: server_url={server_url}, listen_port={listen_port}, use_ipv6={use_ipv6}, panel_host={panel_host}")
+                    # The reverse_port is where the reverse tunnel endpoint listens (this is where end clients connect)
+                    spec_for_node["reverse_port"] = reverse_port
+                    spec_for_node["remote_port"] = int(listen_port)  # Keep for backward compatibility (this is the listen_port)
+                    logger.info(f"Chisel tunnel {db_tunnel.id}: server_url={server_url}, server_control_port={server_control_port}, reverse_port={reverse_port}, use_ipv6={use_ipv6}, panel_host={panel_host}")
             
             logger.info(f"Applying tunnel {db_tunnel.id} to node {node.id}")
             response = await client.send_to_node(
