@@ -113,6 +113,15 @@ def cmd_update(args):
     run_docker_compose(["up", "-d", "--force-recreate"])
 
 
+def cmd_restart(args):
+    """Restart node (preserves tunnels, picks up .env changes)"""
+    print("Restarting node...")
+    # Recreate container to pick up .env changes, but preserve volumes
+    # This ensures tunnels are preserved (they're managed by the panel)
+    run_docker_compose(["up", "-d", "--force-recreate", "--no-deps", "smite-node"])
+    print("Node restarted. Tunnels will be restored by the panel.")
+
+
 def cmd_edit(args):
     """Edit docker-compose.yml"""
     compose_file = get_compose_file()
@@ -146,6 +155,8 @@ def main():
     
     subparsers.add_parser("update", help="Update node")
     
+    subparsers.add_parser("restart", help="Restart node (preserves tunnels)")
+    
     subparsers.add_parser("edit", help="Edit docker-compose.yml")
     
     subparsers.add_parser("edit-env", help="Edit .env file")
@@ -163,6 +174,8 @@ def main():
         cmd_status(args)
     elif args.command == "update":
         cmd_update(args)
+    elif args.command == "restart":
+        cmd_restart(args)
     elif args.command == "edit":
         cmd_edit(args)
     elif args.command == "edit-env":

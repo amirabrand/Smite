@@ -675,6 +675,15 @@ def cmd_update(args):
     run_docker_compose(["up", "-d", "--force-recreate"])
 
 
+def cmd_restart(args):
+    """Restart panel (preserves tunnels, picks up .env changes)"""
+    print("Restarting panel...")
+    # Recreate container to pick up .env changes, but preserve volumes
+    # This ensures tunnels are preserved (they're in the database which is in a volume)
+    run_docker_compose(["up", "-d", "--force-recreate", "--no-deps", "smite-panel"])
+    print("Panel restarted. Tunnels are preserved.")
+
+
 def cmd_edit(args):
     """Edit docker-compose.yml"""
     compose_file = get_compose_file()
@@ -719,6 +728,8 @@ def main():
     
     subparsers.add_parser("update", help="Update panel")
     
+    subparsers.add_parser("restart", help="Restart panel (preserves tunnels)")
+    
     subparsers.add_parser("edit", help="Edit docker-compose.yml")
     
     subparsers.add_parser("edit-env", help="Edit .env file")
@@ -743,6 +754,8 @@ def main():
         cmd_status(args)
     elif args.command == "update":
         cmd_update(args)
+    elif args.command == "restart":
+        cmd_restart(args)
     elif args.command == "edit":
         cmd_edit(args)
     elif args.command == "edit-env":
