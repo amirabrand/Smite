@@ -703,18 +703,43 @@ def cmd_restart(args):
     print("Restarting panel...")
     run_docker_compose(["stop", "smite-panel"])
     run_docker_compose(["rm", "-f", "smite-panel"])
-    result = run_docker_compose(["up", "-d", "--no-deps", "--no-pull", "smite-panel"], capture_output=True)
-    if result.returncode != 0 and "--no-pull" in result.stderr:
-        run_docker_compose(["up", "-d", "--no-deps", "smite-panel"])
-    else:
+    
+    compose_file = get_compose_file()
+    compose_dir = compose_file.parent
+    
+    cmd = ["docker", "compose", "-f", str(compose_file), "up", "-d", "--no-deps", "smite-panel"]
+    env_file = compose_dir / ".env"
+    env_vars = os.environ.copy()
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                parts = line.split('=', 1)
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    value = parts[1].strip()
+                    if key:
+                        env_vars[key] = value
+    
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(compose_dir)
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(compose_dir), env=env_vars)
         if result.returncode != 0:
             print(result.stderr)
             sys.exit(result.returncode)
+    finally:
+        os.chdir(original_cwd)
     
     result = subprocess.run(["docker", "ps", "--filter", "name=smite-nginx", "--format", "{{.Names}}"], capture_output=True, text=True)
     if result.stdout.strip():
         print("Restarting nginx...")
-        run_docker_compose(["--profile", "https", "restart", "nginx"])
+        try:
+            os.chdir(compose_dir)
+            nginx_cmd = ["docker", "compose", "-f", str(compose_file), "--profile", "https", "restart", "nginx"]
+            subprocess.run(nginx_cmd, cwd=str(compose_dir), env=env_vars)
+        finally:
+            os.chdir(original_cwd)
     
     print("Panel restarted. Tunnels are preserved.")
 
