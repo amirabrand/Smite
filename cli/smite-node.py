@@ -117,7 +117,9 @@ def cmd_update(args):
 def cmd_restart(args):
     """Restart node (recreate container to pick up .env changes, no pull)"""
     print("Restarting node...")
-    run_docker_compose(["up", "-d", "--force-recreate", "--no-deps", "--no-pull", "smite-node"])
+    run_docker_compose(["stop", "smite-node"])
+    run_docker_compose(["rm", "-f", "smite-node"])
+    run_docker_compose(["up", "-d", "--no-deps", "--no-pull", "smite-node"])
     print("Node restarted. Tunnels will be restored by the panel.")
 
 

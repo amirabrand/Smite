@@ -679,7 +679,9 @@ def cmd_update(args):
 def cmd_restart(args):
     """Restart panel (recreate container to pick up .env changes, no pull)"""
     print("Restarting panel...")
-    run_docker_compose(["up", "-d", "--force-recreate", "--no-deps", "--no-pull", "smite-panel"])
+    run_docker_compose(["stop", "smite-panel"])
+    run_docker_compose(["rm", "-f", "smite-panel"])
+    run_docker_compose(["up", "-d", "--no-deps", "--no-pull", "smite-panel"])
     print("Panel restarted. Tunnels are preserved.")
 
 
