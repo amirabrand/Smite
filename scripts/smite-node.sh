@@ -102,10 +102,15 @@ PANEL_API_PORT=$PANEL_API_PORT
 EOF
 
 # Clone/update node files from GitHub
+GIT_BRANCH=""
+if [ "${SMITE_VERSION:-latest}" = "next" ]; then
+    GIT_BRANCH="-b next"
+fi
+
 if [ ! -f "Dockerfile" ]; then
     echo "Cloning node files from GitHub..."
     TEMP_DIR=$(mktemp -d)
-    git clone https://github.com/zZedix/Smite.git "$TEMP_DIR" || {
+    git clone --depth 1 $GIT_BRANCH https://github.com/zZedix/Smite.git "$TEMP_DIR" || {
         echo "Error: Failed to clone repository"
         exit 1
     }
@@ -117,7 +122,7 @@ else
     # Update docker-compose.yml and Dockerfile if they exist
     echo "Updating node files from GitHub..."
     TEMP_DIR=$(mktemp -d)
-    git clone https://github.com/zZedix/Smite.git "$TEMP_DIR" || {
+    git clone --depth 1 $GIT_BRANCH https://github.com/zZedix/Smite.git "$TEMP_DIR" || {
         echo "Warning: Failed to clone repository for updates"
         rm -rf "$TEMP_DIR"
     } || true
@@ -138,7 +143,11 @@ elif [ -f "$INSTALL_DIR/../Smite/cli/smite-node.py" ]; then
 else
     # Download CLI directly
     echo "Downloading CLI tool..."
-    sudo curl -L https://raw.githubusercontent.com/zZedix/Smite/main/cli/smite-node.py -o /usr/local/bin/smite-node
+    CLI_BRANCH="main"
+    if [ "${SMITE_VERSION:-latest}" = "next" ]; then
+        CLI_BRANCH="next"
+    fi
+    sudo curl -L https://raw.githubusercontent.com/zZedix/Smite/${CLI_BRANCH}/cli/smite-node.py -o /usr/local/bin/smite-node
     sudo chmod +x /usr/local/bin/smite-node
 fi
 
