@@ -45,7 +45,8 @@ RUN set -eux; \
     rm -rf "$CHISEL_TMP"; \
     echo "Fetching FRP release"; \
     FRP_VERSION="v0.65.0"; \
-    FRP_URL="https://github.com/fatedier/frp/releases/download/${FRP_VERSION}/frp_${FRP_VERSION}_linux_${ARCH}.tar.gz"; \
+    FRP_VERSION_NO_V="${FRP_VERSION#v}"; \
+    FRP_URL="https://github.com/fatedier/frp/releases/download/${FRP_VERSION}/frp_${FRP_VERSION_NO_V}_linux_${ARCH}.tar.gz"; \
     FRP_TMP="$(mktemp -d)"; \
     curl -fsSL "$FRP_URL" -o "$FRP_TMP/frp.tar.gz"; \
     tar -xzf "$FRP_TMP/frp.tar.gz" -C "$FRP_TMP"; \
