@@ -602,23 +602,24 @@ class FrpAdapter:
         if not server_addr or server_addr in ["0.0.0.0", "localhost", "127.0.0.1", "::1"]:
             raise ValueError(f"Invalid FRP server_addr: {server_addr}. Must be a valid panel IP address or hostname.")
         
-        # Create FRP client config file
-        config_file = self.config_dir / f"frpc_{tunnel_id}.toml"
-        config_content = f"""[common]
-serverAddr = "{server_addr}"
-serverPort = {server_port}
+        # Create FRP client config file - Use YAML format as TOML seems to have issues with serverAddr in FRP v0.65.0
+        config_file = self.config_dir / f"frpc_{tunnel_id}.yaml"
+        config_content = f"""serverAddr: "{server_addr}"
+serverPort: {server_port}
 """
         if token:
-            config_content += f'auth.method = "token"\n'
-            config_content += f'auth.token = "{token}"\n'
+            config_content += f"""auth:
+  method: token
+  token: "{token}"
+"""
         
         config_content += f"""
-[[proxies]]
-name = "{tunnel_id}"
-type = "{tunnel_type}"
-localIP = "{local_ip}"
-localPort = {local_port}
-remotePort = {remote_port}
+proxies:
+  - name: {tunnel_id}
+    type: {tunnel_type}
+    localIP: {local_ip}
+    localPort: {local_port}
+    remotePort: {remote_port}
 """
         
         with open(config_file, 'w') as f:
@@ -744,7 +745,7 @@ remotePort = {remote_port}
             del self.log_handles[tunnel_id]
         
         # Clean up config file
-        config_file = self.config_dir / f"frpc_{tunnel_id}.toml"
+        config_file = self.config_dir / f"frpc_{tunnel_id}.yaml"
         if config_file.exists():
             try:
                 config_file.unlink()
