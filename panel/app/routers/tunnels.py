@@ -352,28 +352,51 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 bind_port = spec_for_node.get("bind_port", 7000)
                 token = spec_for_node.get("token")
                 
-                panel_host = spec_for_node.get("panel_host")
+                # Get panel address from node's metadata (set during node registration)
+                panel_address = node.node_metadata.get("panel_address", "")
+                panel_host = None
                 
-                if not panel_host:
-                    panel_address = node.node_metadata.get("panel_address", "")
-                    if panel_address:
-                        if "://" in panel_address:
-                            panel_address = panel_address.split("://", 1)[1]
-                        if ":" in panel_address:
-                            panel_host = panel_address.split(":")[0]
-                        else:
-                            panel_host = panel_address
+                if panel_address:
+                    # Parse panel_address (can be "host:port" or "http://host:port" or "https://host:port")
+                    if "://" in panel_address:
+                        panel_address = panel_address.split("://", 1)[1]
+                    if ":" in panel_address:
+                        panel_host = panel_address.split(":")[0]
+                    else:
+                        panel_host = panel_address
                 
-                if not panel_host or panel_host in ["localhost", "127.0.0.1", "::1"]:
-                    panel_host = request.url.hostname
-                    if not panel_host or panel_host in ["localhost", "127.0.0.1", "::1"]:
-                        forwarded_host = request.headers.get("X-Forwarded-Host")
-                        if forwarded_host:
-                            panel_host = forwarded_host.split(":")[0] if ":" in forwarded_host else forwarded_host
+                # Fallback to spec panel_host if metadata doesn't have it
+                if not panel_host or panel_host in ["localhost", "127.0.0.1", "::1", "0.0.0.0"]:
+                    panel_host = spec_for_node.get("panel_host")
+                    if panel_host and "://" in panel_host:
+                        panel_host = panel_host.split("://", 1)[1]
+                    if panel_host and ":" in panel_host:
+                        panel_host = panel_host.split(":")[0]
                 
-                if not panel_host or panel_host in ["localhost", "127.0.0.1", "::1"]:
-                    logger.warning(f"FRP tunnel {db_tunnel.id}: Could not determine panel host, using request hostname: {request.url.hostname}. Node may not be able to connect if this is localhost.")
-                    panel_host = request.url.hostname or "localhost"
+                # Try X-Forwarded-Host header
+                if not panel_host or panel_host in ["localhost", "127.0.0.1", "::1", "0.0.0.0"]:
+                    forwarded_host = request.headers.get("X-Forwarded-Host")
+                    if forwarded_host:
+                        panel_host = forwarded_host.split(":")[0] if ":" in forwarded_host else forwarded_host
+                
+                # Try request hostname (but reject 0.0.0.0)
+                if not panel_host or panel_host in ["localhost", "127.0.0.1", "::1", "0.0.0.0"]:
+                    request_host = request.url.hostname
+                    if request_host and request_host not in ["localhost", "127.0.0.1", "::1", "0.0.0.0"]:
+                        panel_host = request_host
+                
+                # Try environment variable as last resort
+                if not panel_host or panel_host in ["localhost", "127.0.0.1", "::1", "0.0.0.0"]:
+                    import os
+                    panel_public_ip = os.getenv("PANEL_PUBLIC_IP") or os.getenv("PANEL_IP")
+                    if panel_public_ip and panel_public_ip not in ["localhost", "127.0.0.1", "::1", "0.0.0.0"]:
+                        panel_host = panel_public_ip
+                
+                # If still no valid host, raise error
+                if not panel_host or panel_host in ["localhost", "127.0.0.1", "::1", "0.0.0.0"]:
+                    error_msg = f"Cannot determine panel address for FRP tunnel {db_tunnel.id}. Node's panel_address in metadata is: {panel_address}. Please ensure node has correct PANEL_ADDRESS configured or set PANEL_PUBLIC_IP environment variable on panel."
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
                 
                 from app.utils import is_valid_ipv6_address
                 if is_valid_ipv6_address(panel_host):
@@ -385,7 +408,7 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 spec_for_node["server_port"] = int(bind_port)
                 if token:
                     spec_for_node["token"] = token
-                logger.info(f"FRP tunnel {db_tunnel.id}: server_addr={server_addr}, server_port={bind_port}, token={'set' if token else 'none'}, panel_host={panel_host}")
+                logger.info(f"FRP tunnel {db_tunnel.id}: server_addr={server_addr}, server_port={bind_port}, token={'set' if token else 'none'}, panel_host={panel_host} (from node panel_address: {panel_address})")
             
             logger.info(f"Applying tunnel {db_tunnel.id} to node {node.id}")
             response = await client.send_to_node(
