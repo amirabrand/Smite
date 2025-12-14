@@ -255,21 +255,28 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                     await db.refresh(db_tunnel)
                     return db_tunnel
                 
-                # Server config: foreign node listens on proxy_port
-                server_spec["bind_addr"] = f"0.0.0.0:{proxy_port}"
+                # Server config: foreign node listens on control port and proxy port
+                # Control port for rathole server (default 23333 or from remote_addr)
+                remote_addr = server_spec.get("remote_addr", "0.0.0.0:23333")
+                from app.utils import parse_address_port
+                _, control_port, _ = parse_address_port(remote_addr)
+                if not control_port:
+                    control_port = 23333
+                server_spec["bind_addr"] = f"0.0.0.0:{control_port}"
                 server_spec["proxy_port"] = proxy_port
                 
                 # Client config: iran node connects to foreign node
                 foreign_node_ip = foreign_node.node_metadata.get("ip_address")
-                remote_addr = server_spec.get("remote_addr") or f"{foreign_node_ip}:{proxy_port}"
-                client_spec["remote_addr"] = remote_addr
+                client_spec["remote_addr"] = f"{foreign_node_ip}:{control_port}"
                 client_spec["token"] = token
-                # Client forwards to local service (e.g., Xray on foreign node)
-                local_addr = client_spec.get("local_addr", f"{foreign_node_ip}:{proxy_port}")
+                # Client forwards to proxy port on foreign node (where Xray listens)
+                local_addr = client_spec.get("local_addr")
+                if not local_addr:
+                    local_addr = f"{foreign_node_ip}:{proxy_port}"
                 client_spec["local_addr"] = local_addr
                 
             elif db_tunnel.core == "chisel":
-                # Similar logic for chisel
+                # Chisel server config for foreign node
                 listen_port = server_spec.get("listen_port") or server_spec.get("remote_port")
                 if not listen_port:
                     db_tunnel.status = "error"
@@ -280,12 +287,27 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 
                 foreign_node_ip = foreign_node.node_metadata.get("ip_address")
                 server_control_port = server_spec.get("control_port") or (int(listen_port) + 10000)
+                # Server config: foreign node runs chisel server
                 server_spec["server_port"] = server_control_port
                 server_spec["reverse_port"] = listen_port
+                auth = server_spec.get("auth")
+                if auth:
+                    server_spec["auth"] = auth
+                fingerprint = server_spec.get("fingerprint")
+                if fingerprint:
+                    server_spec["fingerprint"] = fingerprint
                 
+                # Client config: iran node connects to foreign node
                 client_spec["server_url"] = f"http://{foreign_node_ip}:{server_control_port}"
                 client_spec["reverse_port"] = listen_port
-                local_addr = client_spec.get("local_addr", f"{foreign_node_ip}:{listen_port}")
+                if auth:
+                    client_spec["auth"] = auth
+                if fingerprint:
+                    client_spec["fingerprint"] = fingerprint
+                local_addr = client_spec.get("local_addr")
+                if not local_addr:
+                    # Default: forward to the same port on foreign node (where Xray might be)
+                    local_addr = f"{foreign_node_ip}:{listen_port}"
                 client_spec["local_addr"] = local_addr
                 
             elif db_tunnel.core == "frp":
@@ -308,22 +330,45 @@ async def create_tunnel(tunnel: TunnelCreate, request: Request, db: AsyncSession
                 client_spec["local_port"] = local_port
                 
             elif db_tunnel.core == "backhaul":
-                # Backhaul similar to rathole
-                proxy_port = server_spec.get("remote_port") or server_spec.get("listen_port")
+                # Backhaul server config for foreign node
+                transport = server_spec.get("transport") or server_spec.get("type") or "tcp"
+                control_port = server_spec.get("control_port") or server_spec.get("listen_port") or 3080
+                public_port = server_spec.get("public_port") or server_spec.get("remote_port") or server_spec.get("listen_port")
+                target_host = server_spec.get("target_host", "127.0.0.1")
+                target_port = server_spec.get("target_port") or public_port
                 token = server_spec.get("token")
-                if not proxy_port or not token:
+                
+                if not public_port:
                     db_tunnel.status = "error"
-                    db_tunnel.error_message = "Backhaul requires remote_port and token"
+                    db_tunnel.error_message = "Backhaul requires public_port or remote_port"
                     await db.commit()
                     await db.refresh(db_tunnel)
                     return db_tunnel
                 
-                server_spec["bind_addr"] = f"0.0.0.0:{proxy_port}"
+                # Server config
+                bind_ip = server_spec.get("bind_ip") or server_spec.get("listen_ip") or "0.0.0.0"
+                server_spec["bind_addr"] = f"{bind_ip}:{control_port}"
+                server_spec["transport"] = transport
+                if target_port:
+                    target_addr = f"{target_host}:{target_port}"
+                    server_spec["ports"] = [f"{public_port}={target_addr}"]
+                else:
+                    server_spec["ports"] = [str(public_port)]
+                if token:
+                    server_spec["token"] = token
+                
+                # Client config: iran node connects to foreign node
                 foreign_node_ip = foreign_node.node_metadata.get("ip_address")
-                client_spec["remote_addr"] = f"{foreign_node_ip}:{proxy_port}"
-                client_spec["token"] = token
-                local_addr = client_spec.get("local_addr", f"{foreign_node_ip}:{proxy_port}")
-                client_spec["local_addr"] = local_addr
+                client_spec["remote_addr"] = f"{foreign_node_ip}:{control_port}"
+                client_spec["transport"] = transport
+                if token:
+                    client_spec["token"] = token
+                # Client forwards to target on foreign node
+                local_addr = client_spec.get("local_addr")
+                if not local_addr and target_port:
+                    local_addr = f"{target_host}:{target_port}"
+                if local_addr:
+                    client_spec["local_addr"] = local_addr
             
             # Apply server config to foreign node
             if not foreign_node.node_metadata.get("api_address"):

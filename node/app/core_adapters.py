@@ -259,66 +259,143 @@ class BackhaulAdapter:
         ]
 
     def apply(self, tunnel_id: str, spec: Dict[str, Any]):
+        """Apply Backhaul tunnel - supports both server and client modes"""
         if tunnel_id in self.processes:
             logger.info(f"Backhaul tunnel {tunnel_id} already exists, removing it first")
             self.remove(tunnel_id)
         
-        remote_addr = spec.get("remote_addr") or spec.get("control_addr") or spec.get("bind_addr")
-        if not remote_addr:
-            raise ValueError("Backhaul requires 'remote_addr' in spec")
+        mode = spec.get('mode', 'client')  # Default to client for backward compatibility
+        
+        if mode == 'server':
+            # Server mode: foreign node runs backhaul server
+            transport = (spec.get("transport") or spec.get("type") or "tcp").lower()
+            if transport not in {"tcp", "udp", "ws", "wsmux", "tcpmux"}:
+                raise ValueError(f"Unsupported Backhaul transport '{transport}'")
+            
+            server_options = dict(spec.get("server_options") or {})
+            bind_addr = spec.get("bind_addr")
+            if not bind_addr:
+                control_port = spec.get("control_port") or spec.get("listen_port") or 3080
+                bind_ip = spec.get("bind_ip", "0.0.0.0")
+                bind_addr = f"{bind_ip}:{control_port}"
+            
+            # Build ports configuration
+            ports = spec.get("ports")
+            if not ports:
+                listen_port = spec.get("public_port") or spec.get("listen_port")
+                target_addr = spec.get("target_addr")
+                if not target_addr:
+                    target_host = spec.get("target_host", "127.0.0.1")
+                    target_port = spec.get("target_port") or listen_port
+                    if target_port:
+                        target_addr = f"{target_host}:{target_port}"
+                if listen_port and target_addr:
+                    ports = [f"{listen_port}={target_addr}"]
+                elif listen_port:
+                    ports = [str(listen_port)]
+                else:
+                    ports = []
+            
+            server_config: Dict[str, Any] = {
+                "bind_addr": bind_addr,
+                "transport": transport,
+                "ports": ports,
+            }
+            
+            token = spec.get("token") or server_options.get("token")
+            if token:
+                server_config["token"] = token
+            
+            # Add server options
+            SERVER_OPTION_KEYS = [
+                "nodelay", "keepalive_period", "channel_size", "log_level",
+                "heartbeat", "mux_con", "accept_udp", "skip_optz",
+                "tls_cert", "tls_key", "sniffer", "web_port", "proxy_protocol"
+            ]
+            for key in SERVER_OPTION_KEYS:
+                value = server_options.get(key) or spec.get(key)
+                if value is not None and value != "":
+                    server_config[key] = value
+            
+            config_path = self.config_dir / f"{tunnel_id}.toml"
+            config_path.write_text(self._render_toml({"server": server_config}), encoding="utf-8")
+            
+            binary_path = self._resolve_binary_path()
+            log_path = self.config_dir / f"backhaul_{tunnel_id}.log"
+            log_fh = log_path.open("w", buffering=1)
+            log_fh.write(f"Starting Backhaul server for tunnel {tunnel_id}\n")
+            log_fh.write(self._render_toml({"server": server_config}))
+            log_fh.flush()
+            
+            try:
+                proc = subprocess.Popen(
+                    [str(binary_path), "-c", str(config_path)],
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(self.config_dir),
+                    start_new_session=True,
+                )
+            except Exception:
+                log_fh.close()
+                raise
+        else:
+            # Client mode: iran node runs backhaul client
+            remote_addr = spec.get("remote_addr") or spec.get("control_addr") or spec.get("bind_addr")
+            if not remote_addr:
+                raise ValueError("Backhaul client requires 'remote_addr' in spec")
 
-        transport = (spec.get("transport") or spec.get("type") or "tcp").lower()
-        if transport not in {"tcp", "udp", "ws", "wsmux", "tcpmux"}:
-            raise ValueError(f"Unsupported Backhaul transport '{transport}'")
-        client_options = dict(spec.get("client_options") or {})
+            transport = (spec.get("transport") or spec.get("type") or "tcp").lower()
+            if transport not in {"tcp", "udp", "ws", "wsmux", "tcpmux"}:
+                raise ValueError(f"Unsupported Backhaul transport '{transport}'")
+            client_options = dict(spec.get("client_options") or {})
 
-        config_dict: Dict[str, Any] = {
-            "remote_addr": remote_addr,
-            "transport": transport,
-        }
+            config_dict: Dict[str, Any] = {
+                "remote_addr": remote_addr,
+                "transport": transport,
+            }
 
-        token = spec.get("token") or client_options.get("token")
-        if token:
-            config_dict["token"] = token
+            token = spec.get("token") or client_options.get("token")
+            if token:
+                config_dict["token"] = token
 
-        for key in self.CLIENT_OPTION_KEYS:
-            value = client_options.get(key)
-            if value is None or value == "":
-                value = spec.get(key)
-            if value is None or value == "":
-                continue
-            config_dict[key] = value
+            for key in self.CLIENT_OPTION_KEYS:
+                value = client_options.get(key)
+                if value is None or value == "":
+                    value = spec.get(key)
+                if value is None or value == "":
+                    continue
+                config_dict[key] = value
 
-        if "connection_pool" not in config_dict:
-            config_dict["connection_pool"] = 4
-        if "retry_interval" not in config_dict:
-            config_dict["retry_interval"] = 3
-        if "dial_timeout" not in config_dict:
-            config_dict["dial_timeout"] = 10
+            if "connection_pool" not in config_dict:
+                config_dict["connection_pool"] = 4
+            if "retry_interval" not in config_dict:
+                config_dict["retry_interval"] = 3
+            if "dial_timeout" not in config_dict:
+                config_dict["dial_timeout"] = 10
 
-        if spec.get("accept_udp") and transport in {"tcp", "tcpmux"}:
-            config_dict["accept_udp"] = True
+            if spec.get("accept_udp") and transport in {"tcp", "tcpmux"}:
+                config_dict["accept_udp"] = True
 
-        config_path = self.config_dir / f"{tunnel_id}.toml"
-        config_path.write_text(self._render_toml({"client": config_dict}), encoding="utf-8")
+            config_path = self.config_dir / f"{tunnel_id}.toml"
+            config_path.write_text(self._render_toml({"client": config_dict}), encoding="utf-8")
 
-        binary_path = self._resolve_binary_path()
+            binary_path = self._resolve_binary_path()
 
-        log_path = self.config_dir / f"backhaul_{tunnel_id}.log"
-        log_fh = log_path.open("w", buffering=1)
-        log_fh.write(f"Starting Backhaul client for tunnel {tunnel_id}\n")
-        log_fh.write(self._render_toml({"client": config_dict}))
-        log_fh.flush()
+            log_path = self.config_dir / f"backhaul_{tunnel_id}.log"
+            log_fh = log_path.open("w", buffering=1)
+            log_fh.write(f"Starting Backhaul client for tunnel {tunnel_id}\n")
+            log_fh.write(self._render_toml({"client": config_dict}))
+            log_fh.flush()
 
-        try:
-            proc = subprocess.Popen(
-                [str(binary_path), "-c", str(config_path)],
-                stdout=log_fh,
-                stderr=subprocess.STDOUT,
-            )
-        except Exception:
-            log_fh.close()
-            raise
+            try:
+                proc = subprocess.Popen(
+                    [str(binary_path), "-c", str(config_path)],
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
+                )
+            except Exception:
+                log_fh.close()
+                raise
 
         time.sleep(0.5)
         if proc.poll() is not None:
@@ -448,87 +525,139 @@ class ChiselAdapter:
         )
     
     def apply(self, tunnel_id: str, spec: Dict[str, Any]):
-        """Apply Chisel tunnel"""
+        """Apply Chisel tunnel - supports both server and client modes"""
         # Remove existing tunnel if it exists
         if tunnel_id in self.processes:
             logger.info(f"Chisel tunnel {tunnel_id} already exists, removing it first")
             self.remove(tunnel_id)
         
-        server_url = spec.get('server_url', '').strip()
-        reverse_port = spec.get('reverse_port') or spec.get('remote_port') or spec.get('listen_port') or spec.get('server_port')
-        local_addr = spec.get('local_addr')
+        mode = spec.get('mode', 'client')  # Default to client for backward compatibility
         
-        if not server_url:
-            raise ValueError("Chisel requires 'server_url' (panel server address) in spec")
-        if not reverse_port:
-            raise ValueError("Chisel requires 'reverse_port', 'remote_port', or 'listen_port' in spec")
-        
-        if not local_addr:
-            local_addr = f"127.0.0.1:{reverse_port}"
-            logger.warning(f"Chisel tunnel {tunnel_id}: local_addr not specified, defaulting to {local_addr}")
-        
-        host, port, is_ipv6 = parse_address_port(local_addr)
-        if not port:
-            raise ValueError(f"Invalid local_addr format: {local_addr} (port required)")
-        
-        if is_ipv6:
-            reverse_spec = f"R:{reverse_port}:[{host}]:{port}"
+        if mode == 'server':
+            # Server mode: foreign node runs chisel server
+            server_port = spec.get('server_port') or spec.get('control_port') or spec.get('listen_port')
+            if not server_port:
+                raise ValueError("Chisel server requires 'server_port' or 'control_port' in spec")
+            
+            reverse_port = spec.get('reverse_port') or spec.get('remote_port') or spec.get('listen_port')
+            if not reverse_port:
+                raise ValueError("Chisel server requires 'reverse_port' or 'remote_port' in spec")
+            
+            host = "0.0.0.0"
+            binary_path = self._resolve_binary_path()
+            cmd = [
+                str(binary_path),
+                "server",
+                "--host", host,
+                "--port", str(server_port),
+                "--reverse"
+            ]
+            
+            # Optional: Add authentication
+            auth = spec.get('auth')
+            if auth:
+                cmd.extend(["--auth", auth])
+            
+            # Optional: Add fingerprint
+            fingerprint = spec.get('fingerprint')
+            if fingerprint:
+                cmd.extend(["--fingerprint", fingerprint])
+            
+            log_file = self.config_dir / f"{tunnel_id}.log"
+            log_f = open(log_file, 'w', buffering=1)
+            try:
+                log_f.write(f"Starting chisel server for tunnel {tunnel_id}\n")
+                log_f.write(f"Command: {' '.join(cmd)}\n")
+                log_f.write(f"server_port={server_port}, reverse_port={reverse_port}\n")
+                log_f.flush()
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(self.config_dir),
+                    start_new_session=True
+                )
+            except FileNotFoundError:
+                log_f.close()
+                raise RuntimeError("chisel binary not found. Please install chisel.")
         else:
-            reverse_spec = f"R:{reverse_port}:{host}:{port}"
-        logger.info(f"Chisel tunnel {tunnel_id}: reverse_spec={reverse_spec}, server_url={server_url}")
+            # Client mode: iran node runs chisel client
+            server_url = spec.get('server_url', '').strip()
+            reverse_port = spec.get('reverse_port') or spec.get('remote_port') or spec.get('listen_port') or spec.get('server_port')
+            local_addr = spec.get('local_addr')
+            
+            if not server_url:
+                raise ValueError("Chisel client requires 'server_url' (foreign server address) in spec")
+            if not reverse_port:
+                raise ValueError("Chisel client requires 'reverse_port', 'remote_port', or 'listen_port' in spec")
+            
+            if not local_addr:
+                local_addr = f"127.0.0.1:{reverse_port}"
+                logger.warning(f"Chisel tunnel {tunnel_id}: local_addr not specified, defaulting to {local_addr}")
+            
+            host, port, is_ipv6 = parse_address_port(local_addr)
+            if not port:
+                raise ValueError(f"Invalid local_addr format: {local_addr} (port required)")
+            
+            if is_ipv6:
+                reverse_spec = f"R:{reverse_port}:[{host}]:{port}"
+            else:
+                reverse_spec = f"R:{reverse_port}:{host}:{port}"
+            logger.info(f"Chisel tunnel {tunnel_id}: reverse_spec={reverse_spec}, server_url={server_url}")
+            
+            binary_path = self._resolve_binary_path()
+            cmd = [
+                str(binary_path),
+                "client",
+                server_url,
+                reverse_spec
+            ]
+            
+            # Optional: Add authentication if provided
+            auth = spec.get('auth')
+            if auth:
+                cmd.extend(["--auth", auth])
+            
+            # Optional: Add fingerprint if provided
+            fingerprint = spec.get('fingerprint')
+            if fingerprint:
+                cmd.extend(["--fingerprint", fingerprint])
+            
+            # Start chisel client process
+            log_file = self.config_dir / f"{tunnel_id}.log"
+            log_f = open(log_file, 'w', buffering=1)
+            try:
+                log_f.write(f"Starting chisel client for tunnel {tunnel_id}\n")
+                log_f.write(f"Command: {' '.join(cmd)}\n")
+                log_f.write(f"server_url={server_url}, reverse_spec={reverse_spec}\n")
+                log_f.flush()
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(self.config_dir),
+                    start_new_session=True
+                )
+            except FileNotFoundError:
+                log_f.close()
+                raise RuntimeError("chisel binary not found. Please install chisel.")
         
-        binary_path = self._resolve_binary_path()
-        cmd = [
-            str(binary_path),
-            "client",
-            server_url,
-            reverse_spec
-        ]
-        
-        # Optional: Add authentication if provided
-        auth = spec.get('auth')
-        if auth:
-            cmd.extend(["--auth", auth])
-        
-        # Optional: Add fingerprint if provided
-        fingerprint = spec.get('fingerprint')
-        if fingerprint:
-            cmd.extend(["--fingerprint", fingerprint])
-        
-        # Start chisel client process
-        log_file = self.config_dir / f"{tunnel_id}.log"
-        log_f = open(log_file, 'w', buffering=1)
-        try:
-            log_f.write(f"Starting chisel client for tunnel {tunnel_id}\n")
-            log_f.write(f"Command: {' '.join(cmd)}\n")
-            log_f.write(f"server_url={server_url}, reverse_spec={reverse_spec}\n")
-            log_f.flush()
-            proc = subprocess.Popen(
-                cmd,
-                stdout=log_f,
-                stderr=subprocess.STDOUT,
-                cwd=str(self.config_dir),
-                start_new_session=True
-            )
-            self.log_handles[tunnel_id] = log_f
-            self.processes[tunnel_id] = proc
-            time.sleep(1.0)  # Give it more time to start
-            if proc.poll() is not None:
-                stderr = ""
-                if log_file.exists():
-                    with open(log_file, 'r') as f:
-                        stderr = f.read()
-                # Close log handle if process failed
-                if tunnel_id in self.log_handles:
-                    try:
-                        self.log_handles[tunnel_id].close()
-                    except:
-                        pass
-                    del self.log_handles[tunnel_id]
-                raise RuntimeError(f"chisel failed to start: {stderr[-500:] if len(stderr) > 500 else stderr}")
-        except FileNotFoundError:
-            log_f.close()
-            raise RuntimeError("chisel binary not found. Please install chisel.")
+        self.log_handles[tunnel_id] = log_f
+        self.processes[tunnel_id] = proc
+        time.sleep(1.0)  # Give it more time to start
+        if proc.poll() is not None:
+            stderr = ""
+            if log_file.exists():
+                with open(log_file, 'r') as f:
+                    stderr = f.read()
+            # Close log handle if process failed
+            if tunnel_id in self.log_handles:
+                try:
+                    self.log_handles[tunnel_id].close()
+                except:
+                    pass
+                del self.log_handles[tunnel_id]
+            raise RuntimeError(f"chisel failed to start: {stderr[-500:] if len(stderr) > 500 else stderr}")
     
     def remove(self, tunnel_id: str):
         """Remove Chisel tunnel"""
@@ -608,53 +737,120 @@ class FrpAdapter:
         )
     
     def apply(self, tunnel_id: str, spec: Dict[str, Any]):
-        """Apply FRP tunnel"""
+        """Apply FRP tunnel - supports both server and client modes"""
         if tunnel_id in self.processes:
             logger.info(f"FRP tunnel {tunnel_id} already exists, removing it first")
             self.remove(tunnel_id)
         
-        # Log the full spec for debugging
-        logger.info(f"FRP tunnel {tunnel_id} received spec: {spec}")
+        mode = spec.get('mode', 'client')  # Default to client for backward compatibility
         
-        server_addr = spec.get('server_addr', '').strip()
-        server_port = spec.get('server_port', 7000)
-        token = spec.get('token')
-        tunnel_type = spec.get('type', 'tcp').lower()
-        local_port = spec.get('local_port')
-        remote_port = spec.get('remote_port') or spec.get('listen_port')
-        local_ip = spec.get('local_ip', '127.0.0.1')
-        
-        logger.info(f"FRP tunnel {tunnel_id} parsed: server_addr='{server_addr}', server_port={server_port}, token={'set' if token else 'none'}")
-        
-        if not server_addr:
-            raise ValueError("FRP requires 'server_addr' (panel server address) in spec")
-        if not remote_port:
-            raise ValueError("FRP requires 'remote_port' or 'listen_port' in spec")
-        if not local_port:
-            raise ValueError("FRP requires 'local_port' in spec")
-        if tunnel_type not in ['tcp', 'udp']:
-            raise ValueError(f"FRP only supports 'tcp' and 'udp' types, got '{tunnel_type}'")
-        
-        # Clean server_addr - remove brackets if present (for IPv6 format from panel)
-        if server_addr.startswith('[') and server_addr.endswith(']'):
-            server_addr = server_addr[1:-1]
-        
-        # Validate server_addr is not 0.0.0.0 or empty
-        if not server_addr or server_addr in ["0.0.0.0", "localhost", "127.0.0.1", "::1"]:
-            raise ValueError(f"Invalid FRP server_addr: {server_addr}. Must be a valid panel IP address or hostname.")
-        
-        # Create FRP client config file - Use YAML format as TOML seems to have issues with serverAddr in FRP v0.65.0
-        config_file = self.config_dir / f"frpc_{tunnel_id}.yaml"
-        config_content = f"""serverAddr: "{server_addr}"
-serverPort: {server_port}
+        if mode == 'server':
+            # Server mode: foreign node runs frps
+            bind_port = spec.get('bind_port', 7000)
+            token = spec.get('token')
+            
+            config_file = self.config_dir / f"frps_{tunnel_id}.yaml"
+            config_content = f"""bindPort: {bind_port}
 """
-        if token:
-            config_content += f"""auth:
+            if token:
+                config_content += f"""auth:
   method: token
   token: "{token}"
 """
-        
-        config_content += f"""
+            
+            with open(config_file, 'w') as f:
+                f.write(config_content)
+            
+            logger.info(f"FRP server tunnel {tunnel_id}: bind_port={bind_port}, token={'set' if token else 'none'}")
+            
+            # Resolve frps binary path
+            env_path = os.environ.get("FRPS_BINARY")
+            if env_path:
+                binary_path = Path(env_path)
+            else:
+                common_paths = [
+                    Path("/usr/local/bin/frps"),
+                    Path("/usr/bin/frps"),
+                ]
+                binary_path = None
+                for path in common_paths:
+                    if path.exists() and path.is_file():
+                        binary_path = path
+                        break
+                if not binary_path:
+                    resolved = shutil.which("frps")
+                    if resolved:
+                        binary_path = Path(resolved)
+                    else:
+                        raise FileNotFoundError("frps binary not found. Expected at FRPS_BINARY, '/usr/local/bin/frps', or in PATH.")
+            
+            config_file_abs = config_file.resolve()
+            cmd = [
+                str(binary_path),
+                "-c", str(config_file_abs)
+            ]
+            
+            log_file = self.config_dir / f"{tunnel_id}.log"
+            log_f = open(log_file, 'w', buffering=1)
+            try:
+                log_f.write(f"Starting FRP server for tunnel {tunnel_id}\n")
+                log_f.write(f"Command: {' '.join(cmd)}\n")
+                log_f.write(f"Config: bind_port={bind_port}, token={'set' if token else 'none'}\n")
+                log_f.flush()
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(self.config_dir),
+                    start_new_session=True
+                )
+            except FileNotFoundError:
+                log_f.close()
+                raise RuntimeError("FRP server binary (frps) not found. Please install FRP.")
+        else:
+            # Client mode: iran node runs frpc
+            # Log the full spec for debugging
+            logger.info(f"FRP tunnel {tunnel_id} received spec: {spec}")
+            
+            server_addr = spec.get('server_addr', '').strip()
+            server_port = spec.get('server_port', 7000)
+            token = spec.get('token')
+            tunnel_type = spec.get('type', 'tcp').lower()
+            local_port = spec.get('local_port')
+            remote_port = spec.get('remote_port') or spec.get('listen_port')
+            local_ip = spec.get('local_ip', '127.0.0.1')
+            
+            logger.info(f"FRP tunnel {tunnel_id} parsed: server_addr='{server_addr}', server_port={server_port}, token={'set' if token else 'none'}")
+            
+            if not server_addr:
+                raise ValueError("FRP client requires 'server_addr' (foreign server address) in spec")
+            if not remote_port:
+                raise ValueError("FRP client requires 'remote_port' or 'listen_port' in spec")
+            if not local_port:
+                raise ValueError("FRP client requires 'local_port' in spec")
+            if tunnel_type not in ['tcp', 'udp']:
+                raise ValueError(f"FRP only supports 'tcp' and 'udp' types, got '{tunnel_type}'")
+            
+            # Clean server_addr - remove brackets if present (for IPv6 format)
+            if server_addr.startswith('[') and server_addr.endswith(']'):
+                server_addr = server_addr[1:-1]
+            
+            # Validate server_addr is not 0.0.0.0 or empty
+            if not server_addr or server_addr in ["0.0.0.0", "localhost", "127.0.0.1", "::1"]:
+                raise ValueError(f"Invalid FRP server_addr: {server_addr}. Must be a valid foreign server IP address or hostname.")
+            
+            # Create FRP client config file
+            config_file = self.config_dir / f"frpc_{tunnel_id}.yaml"
+            config_content = f"""serverAddr: "{server_addr}"
+serverPort: {server_port}
+"""
+            if token:
+                config_content += f"""auth:
+  method: token
+  token: "{token}"
+"""
+            
+            config_content += f"""
 proxies:
   - name: {tunnel_id}
     type: {tunnel_type}
@@ -662,107 +858,54 @@ proxies:
     localPort: {local_port}
     remotePort: {remote_port}
 """
+            
+            with open(config_file, 'w') as f:
+                f.write(config_content)
+            
+            logger.info(f"FRP tunnel {tunnel_id}: type={tunnel_type}, local={local_ip}:{local_port}, remote={remote_port}, server={server_addr}:{server_port}")
+            
+            binary_path = self._resolve_binary_path()
+            config_file_abs = config_file.resolve()
+            
+            cmd = [
+                str(binary_path),
+                "-c", str(config_file_abs)
+            ]
+            
+            log_file = self.config_dir / f"{tunnel_id}.log"
+            log_f = open(log_file, 'w', buffering=1)
+            try:
+                log_f.write(f"Starting FRP client for tunnel {tunnel_id}\n")
+                log_f.write(f"Command: {' '.join(cmd)}\n")
+                log_f.write(f"Config: type={tunnel_type}, local={local_ip}:{local_port}, remote={remote_port}, server={server_addr}:{server_port}\n")
+                log_f.flush()
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(self.config_dir),
+                    start_new_session=True,
+                    env=os.environ.copy()
+                )
+            except FileNotFoundError:
+                log_f.close()
+                raise RuntimeError("FRP binary (frpc) not found. Please install FRP.")
         
-        with open(config_file, 'w') as f:
-            f.write(config_content)
-        
-        # Log the actual config file content for debugging
-        logger.info(f"FRP tunnel {tunnel_id}: type={tunnel_type}, local={local_ip}:{local_port}, remote={remote_port}, server={server_addr}:{server_port}")
-        logger.info(f"FRP config file {config_file} content:\n{config_content}")
-        
-        # Verify the config file was written correctly
-        if config_file.exists():
-            with open(config_file, 'r') as f:
-                written_content = f.read()
-                logger.info(f"FRP config file {config_file} read back:\n{written_content}")
-                if 'serverAddr = "0.0.0.0"' in written_content or 'serverAddr = 0.0.0.0' in written_content:
-                    logger.error(f"ERROR: Config file contains 0.0.0.0! Written content:\n{written_content}")
-                    raise ValueError(f"Config file incorrectly contains 0.0.0.0. server_addr was: {server_addr}")
-                if server_addr not in written_content:
-                    logger.error(f"ERROR: Config file does not contain server_addr '{server_addr}'! Written content:\n{written_content}")
-                    raise ValueError(f"Config file does not contain expected server_addr '{server_addr}'")
-        
-        binary_path = self._resolve_binary_path()
-        
-        # Use absolute path for config file
-        config_file_abs = config_file.resolve()
-        logger.info(f"FRP using config file: {config_file_abs}")
-        
-        # Verify config file exists and is readable
-        if not config_file_abs.exists():
-            raise FileNotFoundError(f"FRP config file does not exist: {config_file_abs}")
-        if not os.access(config_file_abs, os.R_OK):
-            raise PermissionError(f"FRP config file is not readable: {config_file_abs}")
-        
-        # Read and log the actual file content one more time before starting
-        with open(config_file_abs, 'r') as f:
-            final_content = f.read()
-            logger.info(f"FRP config file final content before starting:\n{final_content}")
-            if '0.0.0.0' in final_content and server_addr != '0.0.0.0':
-                raise ValueError(f"Config file contains 0.0.0.0 unexpectedly: {final_content}")
-        
-        cmd = [
-            str(binary_path),
-            "-c", str(config_file_abs)
-        ]
-        
-        logger.info(f"FRP command: {' '.join(cmd)}")
-        logger.info(f"FRP working directory: {self.config_dir}")
-        
-        # Try to validate config with FRP (if it supports --validate or similar)
-        # Some FRP versions support config validation
-        try:
-            validate_cmd = [str(binary_path), "-c", str(config_file_abs), "--check"]
-            validate_result = subprocess.run(
-                validate_cmd,
-                capture_output=True,
-                text=True,
-                timeout=5,
-                cwd=str(self.config_dir)
-            )
-            if validate_result.returncode == 0:
-                logger.info(f"FRP config validation passed")
-            else:
-                logger.warning(f"FRP config validation returned code {validate_result.returncode}: {validate_result.stderr}")
-        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
-            # FRP might not support --check, that's okay
-            logger.debug(f"FRP config validation not available or failed: {e}")
-        
-        log_file = self.config_dir / f"{tunnel_id}.log"
-        log_f = open(log_file, 'w', buffering=1)
-        try:
-            log_f.write(f"Starting FRP client for tunnel {tunnel_id}\n")
-            log_f.write(f"Command: {' '.join(cmd)}\n")
-            log_f.write(f"Config file: {config_file_abs}\n")
-            log_f.write(f"Config file exists: {config_file_abs.exists()}\n")
-            log_f.write(f"Config: type={tunnel_type}, local={local_ip}:{local_port}, remote={remote_port}, server={server_addr}:{server_port}\n")
-            log_f.flush()
-            proc = subprocess.Popen(
-                cmd,
-                stdout=log_f,
-                stderr=subprocess.STDOUT,
-                cwd=str(self.config_dir),
-                start_new_session=True,
-                env=os.environ.copy()  # Ensure no env vars override config
-            )
-            self.log_handles[tunnel_id] = log_f
-            self.processes[tunnel_id] = proc
-            time.sleep(1.0)
-            if proc.poll() is not None:
-                stderr = ""
-                if log_file.exists():
-                    with open(log_file, 'r') as f:
-                        stderr = f.read()
-                if tunnel_id in self.log_handles:
-                    try:
-                        self.log_handles[tunnel_id].close()
-                    except:
-                        pass
-                    del self.log_handles[tunnel_id]
-                raise RuntimeError(f"frpc failed to start: {stderr[-500:] if len(stderr) > 500 else stderr}")
-        except FileNotFoundError:
-            log_f.close()
-            raise RuntimeError("frpc binary not found. Please install frp.")
+        self.log_handles[tunnel_id] = log_f
+        self.processes[tunnel_id] = proc
+        time.sleep(1.0)
+        if proc.poll() is not None:
+            stderr = ""
+            if log_file.exists():
+                with open(log_file, 'r') as f:
+                    stderr = f.read()
+            if tunnel_id in self.log_handles:
+                try:
+                    self.log_handles[tunnel_id].close()
+                except:
+                    pass
+                del self.log_handles[tunnel_id]
+            raise RuntimeError(f"FRP failed to start: {stderr[-500:] if len(stderr) > 500 else stderr}")
     
     def remove(self, tunnel_id: str):
         """Remove FRP tunnel"""

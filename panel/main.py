@@ -59,6 +59,8 @@ async def lifespan(app: FastAPI):
     
     app.state.gost_forwarder = gost_forwarder
     
+    # Server managers are kept for backward compatibility but disabled
+    # Servers now run on foreign nodes, not on the panel
     app.state.rathole_server_manager = rathole_server_manager
     app.state.backhaul_manager = backhaul_manager
     app.state.chisel_server_manager = chisel_server_manager
@@ -66,10 +68,11 @@ async def lifespan(app: FastAPI):
     
     await _restore_forwards()
     
-    await _restore_rathole_servers()
-    await _restore_backhaul_servers()
-    await _restore_chisel_servers()
-    await _restore_frp_servers()
+    # Disabled: Servers now run on foreign nodes
+    # await _restore_rathole_servers()
+    # await _restore_backhaul_servers()
+    # await _restore_chisel_servers()
+    # await _restore_frp_servers()
     
     # Restore node-side tunnels after panel-side is restored
     await _restore_node_tunnels()
@@ -93,10 +96,11 @@ async def lifespan(app: FastAPI):
     
     gost_forwarder.cleanup_all()
     
-    rathole_server_manager.cleanup_all()
-    backhaul_manager.cleanup_all()
-    chisel_server_manager.cleanup_all()
-    frp_server_manager.cleanup_all()
+    # Cleanup disabled: Servers now run on foreign nodes
+    # rathole_server_manager.cleanup_all()
+    # backhaul_manager.cleanup_all()
+    # chisel_server_manager.cleanup_all()
+    # frp_server_manager.cleanup_all()
 
 
 async def _restore_forwards():
