@@ -49,13 +49,28 @@ async def lifespan(app: FastAPI):
             cert_path = Path(os.getcwd()) / cert_path
         
         if not cert_path.exists() or cert_path.stat().st_size == 0:
-            logger.info("Generating CA certificate on startup...")
+            logger.info("Generating CA certificate for Iran nodes on startup...")
             h2_server.cert_path = str(cert_path)
             h2_server.key_path = str(cert_path.parent / "ca.key")
-            await h2_server._generate_certs()
+            await h2_server._generate_certs(common_name="Smite CA")
             logger.info(f"CA certificate generated at {cert_path}")
     except Exception as e:
         logger.warning(f"Failed to generate CA certificate on startup: {e}")
+    
+    # Generate server CA cert if needed
+    try:
+        server_cert_path = Path(settings.hysteria2_server_cert_path)
+        if not server_cert_path.is_absolute():
+            server_cert_path = Path(os.getcwd()) / server_cert_path
+        
+        if not server_cert_path.exists() or server_cert_path.stat().st_size == 0:
+            logger.info("Generating CA certificate for foreign servers on startup...")
+            h2_server.cert_path = str(server_cert_path)
+            h2_server.key_path = str(server_cert_path.parent / "ca-server.key")
+            await h2_server._generate_certs(common_name="Smite Server CA")
+            logger.info(f"Server CA certificate generated at {server_cert_path}")
+    except Exception as e:
+        logger.warning(f"Failed to generate server CA certificate on startup: {e}")
     
     app.state.gost_forwarder = gost_forwarder
     

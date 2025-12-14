@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("/ca")
 async def get_ca_cert(download: bool = False):
-    """Get CA certificate for node enrollment"""
+    """Get CA certificate for Iran node enrollment"""
     from app.hysteria2_server import Hysteria2Server
     import os
     
@@ -63,6 +63,66 @@ async def get_ca_cert(download: bool = False):
             media_type="application/x-pem-file",
             filename="ca.crt",
             headers={"Content-Disposition": "attachment; filename=ca.crt"}
+        )
+    
+    return Response(content=cert_content, media_type="text/plain")
+
+
+@router.get("/ca/server")
+async def get_server_ca_cert(download: bool = False):
+    """Get CA certificate for foreign server enrollment"""
+    from app.hysteria2_server import Hysteria2Server
+    import os
+    
+    cert_path_str = settings.hysteria2_server_cert_path
+    cert_path = Path(cert_path_str)
+    
+    if not cert_path.is_absolute():
+        base_dir = Path(os.getcwd())
+        cert_path = base_dir / cert_path
+    
+    logger.debug(f"Looking for server certificate at: {cert_path} (exists: {cert_path.exists()})")
+    
+    cert_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    needs_generation = False
+    if not cert_path.exists():
+        needs_generation = True
+        logger.info(f"Server CA certificate missing at {cert_path}, generating...")
+    elif cert_path.stat().st_size == 0:
+        needs_generation = True
+        logger.info(f"Server CA certificate is empty (0 bytes) at {cert_path}, deleting and regenerating...")
+        try:
+            cert_path.unlink()
+        except:
+            pass
+    
+    if needs_generation:
+        h2_server = Hysteria2Server()
+        h2_server.cert_path = str(cert_path)
+        h2_server.key_path = str(cert_path.parent / "ca-server.key")
+        # Generate with different CN to distinguish from node CA
+        await h2_server._generate_certs(common_name="Smite Server CA")
+        logger.info(f"Server certificate generated at {cert_path}")
+    
+    if not cert_path.exists():
+        raise HTTPException(status_code=500, detail=f"Failed to generate server CA certificate at {cert_path}")
+    
+    try:
+        cert_content = cert_path.read_text()
+        logger.debug(f"Server certificate file size: {len(cert_content)} bytes")
+        if not cert_content or not cert_content.strip():
+            raise HTTPException(status_code=500, detail="Server CA certificate is empty after generation")
+    except Exception as e:
+        logger.error(f"Error reading server certificate: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to read server certificate: {str(e)}")
+    
+    if download:
+        return FileResponse(
+            cert_path,
+            media_type="application/x-pem-file",
+            filename="ca-server.crt",
+            headers={"Content-Disposition": "attachment; filename=ca-server.crt"}
         )
     
     return Response(content=cert_content, media_type="text/plain")

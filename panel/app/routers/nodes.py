@@ -49,16 +49,33 @@ async def create_node(node: NodeCreate, db: AsyncSession = Depends(get_db)):
     metadata["api_address"] = f"http://{node.ip_address}:{node.api_port}"
     metadata["ip_address"] = node.ip_address
     metadata["api_port"] = node.api_port
-    # Preserve role if provided, default to "iran" for backward compatibility
-    if "role" not in metadata and "role" in node.metadata:
-        metadata["role"] = node.metadata.get("role", "iran")
-    elif "role" not in metadata:
-        metadata["role"] = "iran"  # Default to iran for backward compatibility
+    
+    # Validate and set role
+    incoming_role = node.metadata.get("role", "iran") if node.metadata else "iran"
+    if incoming_role not in ["iran", "foreign"]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid role '{incoming_role}'. Role must be either 'iran' or 'foreign'"
+        )
+    metadata["role"] = incoming_role
     
     if existing:
+        # Check if existing node has a different role - this prevents conflicts
+        existing_role = existing.node_metadata.get("role", "iran") if existing.node_metadata else "iran"
+        if existing_role != incoming_role:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Node with this fingerprint already exists with role '{existing_role}'. "
+                       f"Cannot register as '{incoming_role}'. "
+                       f"Each node must have a consistent role."
+            )
+        
         existing.last_seen = datetime.utcnow()
         existing.status = "active"
+        # Update metadata but preserve role consistency
         existing.node_metadata.update(metadata)
+        # Ensure role is preserved
+        existing.node_metadata["role"] = existing_role
         await db.commit()
         await db.refresh(existing)
         return NodeResponse(

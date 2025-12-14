@@ -16,6 +16,9 @@ const Servers = () => {
   const [servers, setServers] = useState<Server[]>([])
   const [loading, setLoading] = useState(true)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showCertModal, setShowCertModal] = useState(false)
+  const [certContent, setCertContent] = useState('')
+  const [certLoading, setCertLoading] = useState(false)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -53,6 +56,46 @@ const Servers = () => {
     }
   }
 
+  const showCA = async () => {
+    setShowCertModal(true)
+    setCertLoading(true)
+    try {
+      const response = await api.get('/panel/ca/server', {
+        responseType: 'text',
+        headers: {
+          'Accept': 'text/plain'
+        }
+      })
+      const text = response.data
+      if (!text || text.trim().length === 0) {
+        throw new Error('Certificate is empty. Make sure the panel has generated it.')
+      }
+      setCertContent(text)
+    } catch (error: any) {
+      console.error('Failed to fetch CA:', error)
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to fetch CA certificate'
+      alert(`Failed to fetch CA certificate: ${errorMessage}`)
+      setShowCertModal(false)
+    } finally {
+      setCertLoading(false)
+    }
+  }
+
+  const downloadCA = async () => {
+    try {
+      const response = await api.get('/panel/ca/server?download=true', { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', 'ca-server.crt')
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } catch (error) {
+      console.error('Failed to download CA:', error)
+    }
+  }
+
   const deleteServer = async (id: string) => {
     if (!confirm('Are you sure you want to delete this server?')) return
     
@@ -84,6 +127,13 @@ const Servers = () => {
           <p className="text-gray-500 dark:text-gray-400">Manage your foreign tunnel servers</p>
         </div>
         <div className="flex gap-3">
+          <button
+            onClick={showCA}
+            className="px-5 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all duration-200 font-medium shadow-sm hover:shadow-md flex items-center gap-2"
+          >
+            <Copy size={20} />
+            View CA Certificate
+          </button>
           <button
             onClick={() => setShowAddModal(true)}
             className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 font-medium shadow-sm hover:shadow-md flex items-center gap-2"
@@ -188,6 +238,16 @@ const Servers = () => {
           }}
         />
       )}
+
+      {showCertModal && (
+        <CertModal
+          certContent={certContent}
+          loading={certLoading}
+          onClose={() => setShowCertModal(false)}
+          onCopy={() => setCopied(true)}
+          copied={copied}
+        />
+      )}
     </div>
   )
 }
@@ -281,6 +341,102 @@ const AddServerModal = ({ onClose, onSuccess }: AddServerModalProps) => {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+interface CertModalProps {
+  certContent: string
+  loading: boolean
+  onClose: () => void
+  onCopy: () => void
+  copied: boolean
+}
+
+const CertModal = ({ certContent, loading, onClose, onCopy, copied }: CertModalProps) => {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Foreign Server CA Certificate</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          >
+            <XCircle size={24} />
+          </button>
+        </div>
+        
+        <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg">
+          <p className="text-sm text-blue-800 dark:text-blue-200">
+            <strong>Foreign Server Installation:</strong> Copy the certificate below (click "Copy Certificate" button). 
+            During foreign server installation, you will be prompted to paste this certificate.
+          </p>
+        </div>
+
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-gray-500 dark:text-gray-400">Loading certificate...</div>
+          </div>
+        ) : (
+          <>
+            <textarea
+              readOnly
+              value={certContent}
+              className="flex-1 w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg font-mono text-sm bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 resize-none"
+              style={{ minHeight: '300px' }}
+            />
+            
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  try {
+                    if (certContent && certContent.trim().length > 0) {
+                      await navigator.clipboard.writeText(certContent)
+                      onCopy()
+                    } else {
+                      alert('Certificate content is empty. Please wait for it to load.')
+                    }
+                  } catch (error) {
+                    console.error('Failed to copy:', error)
+                    const textarea = e.currentTarget.closest('.bg-white, .dark\\:bg-gray-800')?.querySelector('textarea')
+                    if (textarea) {
+                      textarea.select()
+                      textarea.setSelectionRange(0, 99999)
+                      try {
+                        document.execCommand('copy')
+                        onCopy()
+                      } catch (err) {
+                        alert('Failed to copy to clipboard. Please select and copy manually from the text area above.')
+                      }
+                    } else {
+                      alert('Failed to copy to clipboard. Please select and copy manually from the text area above.')
+                    }
+                  }
+                }}
+                disabled={loading || !certContent || certContent.trim().length === 0}
+                className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                  copied
+                    ? 'bg-green-600 text-white'
+                    : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed'
+                }`}
+              >
+                <Copy size={16} />
+                {copied ? 'Copied!' : 'Copy Certificate'}
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+              >
+                Close
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

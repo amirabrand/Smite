@@ -35,7 +35,7 @@ class Hysteria2Server:
             self.server.close()
             await self.server.wait_closed()
     
-    async def _generate_certs(self):
+    async def _generate_certs(self, common_name: str = "Smite CA"):
         """Generate CA certificate and key"""
         from cryptography import x509
         from cryptography.x509.oid import NameOID
@@ -71,7 +71,7 @@ class Hysteria2Server:
             x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "CA"),
             x509.NameAttribute(NameOID.LOCALITY_NAME, "SF"),
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Smite Panel"),
-            x509.NameAttribute(NameOID.COMMON_NAME, "Smite CA"),
+            x509.NameAttribute(NameOID.COMMON_NAME, common_name),
         ])
         
         cert = x509.CertificateBuilder().subject_name(

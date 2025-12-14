@@ -41,32 +41,6 @@ fi
 echo ""
 echo "Configuration:"
 
-echo ""
-echo "=== CA Certificate ==="
-echo "Please paste the CA certificate from the panel (copy from Nodes > View CA Certificate):"
-echo "Press Enter after pasting, then press Enter again on an empty line to finish"
-echo ""
-PANEL_CA_CONTENT=""
-has_content=false
-while IFS= read -r line; do
-    if [ -z "$line" ]; then
-        # If we have content and hit an empty line, we're done
-        if [ "$has_content" = true ]; then
-            break
-        fi
-        # Otherwise, ignore leading empty lines
-        continue
-    else
-        has_content=true
-        PANEL_CA_CONTENT="${PANEL_CA_CONTENT}${line}\n"
-    fi
-done
-
-if [ -z "$PANEL_CA_CONTENT" ]; then
-    echo "Error: CA certificate is required"
-    exit 1
-fi
-
 read -p "Panel address (host:port, e.g., panel.example.com:443): " PANEL_ADDRESS
 if [ -z "$PANEL_ADDRESS" ]; then
     echo "Error: Panel address is required"
@@ -93,9 +67,37 @@ ROLE_CHOICE=${ROLE_CHOICE:-1}
 if [ "$ROLE_CHOICE" = "2" ]; then
     NODE_ROLE="foreign"
     echo "✅ Selected: Foreign Server"
+    CA_SOURCE="Servers > View CA Certificate"
 else
     NODE_ROLE="iran"
     echo "✅ Selected: Iran Server"
+    CA_SOURCE="Nodes > View CA Certificate"
+fi
+
+echo ""
+echo "=== CA Certificate ==="
+echo "Please paste the CA certificate from the panel (copy from $CA_SOURCE):"
+echo "Press Enter after pasting, then press Enter again on an empty line to finish"
+echo ""
+PANEL_CA_CONTENT=""
+has_content=false
+while IFS= read -r line; do
+    if [ -z "$line" ]; then
+        # If we have content and hit an empty line, we're done
+        if [ "$has_content" = true ]; then
+            break
+        fi
+        # Otherwise, ignore leading empty lines
+        continue
+    else
+        has_content=true
+        PANEL_CA_CONTENT="${PANEL_CA_CONTENT}${line}\n"
+    fi
+done
+
+if [ -z "$PANEL_CA_CONTENT" ]; then
+    echo "Error: CA certificate is required"
+    exit 1
 fi
 
 # Save CA certificate
