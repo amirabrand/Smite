@@ -370,6 +370,11 @@ class BackhaulAdapter:
             if not remote_addr:
                 raise ValueError("Backhaul client requires 'remote_addr' in spec")
 
+            if remote_addr.startswith('ws://'):
+                remote_addr = remote_addr[5:]
+            elif remote_addr.startswith('wss://'):
+                remote_addr = remote_addr[6:]
+
             transport = (spec.get("transport") or spec.get("type") or "tcp").lower()
             if transport not in {"tcp", "udp", "ws", "wsmux", "tcpmux"}:
                 raise ValueError(f"Unsupported Backhaul transport '{transport}'")

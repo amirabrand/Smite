@@ -226,28 +226,29 @@ const CoreHealth = () => {
                     Server Status
                   </h3>
                   <div className="space-y-2">
-                    {Object.entries(coreHealth.servers_status).map(([serverId, serverInfo]) => (
-                      <div key={serverId} className="space-y-1">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400 truncate max-w-[200px]">
-                            {serverInfo.name || serverId.substring(0, 8)}...
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {getStatusIcon(serverInfo.status)}
-                            <span className={`text-sm font-medium ${getStatusColor(serverInfo.status)}`}>
-                              {getStatusText(serverInfo.status)}
-                            </span>
-                          </div>
-                        </div>
-                        {serverInfo.error_message && (
-                          <p className="text-xs text-red-600 dark:text-red-400 ml-2">
-                            {serverInfo.error_message}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                    {serverCount === 0 && (
+                    {serverCount === 0 ? (
                       <span className="text-sm text-gray-500 dark:text-gray-400">No active servers</span>
+                    ) : (
+                      Object.entries(coreHealth.servers_status).map(([serverId, serverInfo]) => (
+                        <div key={serverId} className="space-y-1">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-gray-600 dark:text-gray-400 truncate max-w-[200px]">
+                              {serverInfo.name || serverId.substring(0, 8)}...
+                            </span>
+                            <div className="flex items-center gap-2">
+                              {getStatusIcon(serverInfo.status)}
+                              <span className={`text-sm font-medium ${getStatusColor(serverInfo.status)}`}>
+                                {getStatusText(serverInfo.status)}
+                              </span>
+                            </div>
+                          </div>
+                          {serverInfo.error_message && (
+                            <p className="text-xs text-red-600 dark:text-red-400 ml-2">
+                              {serverInfo.error_message}
+                            </p>
+                          )}
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>
