@@ -1158,9 +1158,15 @@ class AdapterManager:
         }
         self.active_tunnels: Dict[str, CoreAdapter] = {}
         self.config_dir = Path("/var/lib/smite-node")
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Tunnel persistence directory: {self.config_dir} (exists: {self.config_dir.exists()}, writable: {self.config_dir.is_dir()})")
+        except Exception as e:
+            logger.error(f"Failed to create tunnel persistence directory {self.config_dir}: {e}")
+            raise
         self.tunnels_file = self.config_dir / "tunnels.json"
         self.tunnel_configs: Dict[str, Dict[str, Any]] = {}
+        logger.info(f"Tunnel persistence file: {self.tunnels_file}")
     
     def get_adapter(self, tunnel_core: str) -> Optional[CoreAdapter]:
         """Get adapter for tunnel core"""
@@ -1173,21 +1179,32 @@ class AdapterManager:
             try:
                 with open(self.tunnels_file, 'r') as f:
                     self.tunnel_configs = json.load(f)
-                logger.info(f"Loaded {len(self.tunnel_configs)} persisted tunnel configurations")
+                logger.info(f"Loaded {len(self.tunnel_configs)} persisted tunnel configurations from {self.tunnels_file}")
+                for tunnel_id, config in self.tunnel_configs.items():
+                    core = config.get("core", "unknown")
+                    mode = config.get("spec", {}).get("mode", "N/A")
+                    logger.debug(f"  - Tunnel {tunnel_id}: core={core}, mode={mode}")
             except Exception as e:
-                logger.warning(f"Failed to load tunnel configurations: {e}")
+                logger.warning(f"Failed to load tunnel configurations: {e}", exc_info=True)
                 self.tunnel_configs = {}
         else:
+            logger.info(f"No tunnel configurations file found at {self.tunnels_file}")
             self.tunnel_configs = {}
     
     def _save_tunnels(self):
         """Save tunnel configurations to disk"""
         import json
         try:
+            logger.info(f"Saving {len(self.tunnel_configs)} tunnel configurations to {self.tunnels_file}")
             with open(self.tunnels_file, 'w') as f:
                 json.dump(self.tunnel_configs, f, indent=2)
+            if self.tunnels_file.exists():
+                file_size = self.tunnels_file.stat().st_size
+                logger.info(f"Successfully saved tunnel configurations to {self.tunnels_file} (size: {file_size} bytes)")
+            else:
+                logger.error(f"File {self.tunnels_file} was not created after write operation")
         except Exception as e:
-            logger.error(f"Failed to save tunnel configurations: {e}")
+            logger.error(f"Failed to save tunnel configurations to {self.tunnels_file}: {e}", exc_info=True)
     
     async def restore_tunnels(self):
         """Restore all persisted tunnels on startup"""
@@ -1213,16 +1230,32 @@ class AdapterManager:
                     failed += 1
                     continue
                 
+                if not spec:
+                    logger.warning(f"Tunnel {tunnel_id}: Empty spec, skipping")
+                    failed += 1
+                    continue
+                
                 adapter = self.get_adapter(tunnel_core)
                 if not adapter:
                     logger.warning(f"Tunnel {tunnel_id}: Unknown core {tunnel_core}, skipping")
                     failed += 1
                     continue
                 
-                logger.info(f"Restoring tunnel {tunnel_id}: core={tunnel_core}")
-                adapter.apply(tunnel_id, spec)
-                self.active_tunnels[tunnel_id] = adapter
-                restored += 1
+                mode = spec.get('mode', 'N/A')
+                logger.info(f"Restoring tunnel {tunnel_id}: core={tunnel_core}, mode={mode}, spec_keys={list(spec.keys())}")
+                
+                if tunnel_core in ["rathole", "backhaul", "chisel", "frp"] and mode == 'N/A':
+                    logger.warning(f"Tunnel {tunnel_id}: Reverse tunnel missing mode field, defaulting to client")
+                    spec['mode'] = 'client'
+                
+                try:
+                    adapter.apply(tunnel_id, spec)
+                    self.active_tunnels[tunnel_id] = adapter
+                    restored += 1
+                    logger.info(f"Successfully restored tunnel {tunnel_id} (core={tunnel_core}, mode={spec.get('mode', 'N/A')})")
+                except Exception as apply_error:
+                    logger.error(f"Failed to apply tunnel {tunnel_id} during restoration: {apply_error}", exc_info=True)
+                    failed += 1
             except Exception as e:
                 logger.error(f"Failed to restore tunnel {tunnel_id}: {e}", exc_info=True)
                 failed += 1
@@ -1245,17 +1278,17 @@ class AdapterManager:
             logger.error(error_msg)
             raise ValueError(error_msg)
         
-        logger.info(f"Using adapter: {adapter.name}")
+        logger.info(f"Using adapter: {adapter.name}, mode={spec.get('mode', 'N/A')}")
         adapter.apply(tunnel_id, spec)
         self.active_tunnels[tunnel_id] = adapter
         
         self.tunnel_configs[tunnel_id] = {
             "core": tunnel_core,
-            "spec": spec
+            "spec": spec.copy()
         }
+        logger.info(f"Saving tunnel {tunnel_id} to persistent storage (core={tunnel_core}, mode={spec.get('mode', 'N/A')})")
         self._save_tunnels()
-        
-        logger.info(f"Tunnel {tunnel_id} applied successfully")
+        logger.info(f"Tunnel {tunnel_id} applied and saved successfully (core={tunnel_core}, mode={spec.get('mode', 'N/A')}, total_saved={len(self.tunnel_configs)})")
     
     async def remove_tunnel(self, tunnel_id: str):
         """Remove tunnel"""
